@@ -44,11 +44,25 @@ export class Simulation {
     // catch-up ticks on refocus (the "spiral of death" in fixed-step loops).
     if (frameTime > 0.25) frameTime = 0.25;
     this.accumulator += frameTime;
-    while (this.accumulator >= this.tickInterval) {
-      const yawDelta = this.input.drainYawDelta();
-      this.onTick(this.tickInterval, yawDelta);
-      this.accumulator -= this.tickInterval;
+
+    const ticksThisFrame = Math.floor(this.accumulator / this.tickInterval);
+    if (ticksThisFrame > 0) {
+      // Drain the mouse accumulator exactly once per frame, not once per
+      // tick, and split it evenly across however many ticks are catching
+      // up this frame. Draining per-tick meant that after any frame hiccup
+      // (a GC pause, a busy tab -- JS is single-threaded, so no new
+      // mousemove events can arrive mid-burst), the first catch-up tick
+      // grabbed everything that piled up and every other tick in that same
+      // burst got zero: one artificial spike followed by nothing, even
+      // though the real hand motion was smooth the whole time.
+      const totalYaw = this.input.drainYawDelta();
+      const yawPerTick = totalYaw / ticksThisFrame;
+      for (let i = 0; i < ticksThisFrame; i++) {
+        this.onTick(this.tickInterval, yawPerTick);
+        this.accumulator -= this.tickInterval;
+      }
     }
+
     if (this.onFrame) this.onFrame(now);
     this._rafHandle = requestAnimationFrame(this._raf);
   }

@@ -67,7 +67,13 @@ there.
   constant rate (default 66.667, i.e. CS:S 66-tick) independent of display
   refresh rate. Rendering hooks into a separate per-frame callback so the
   numeric HUD stays live at full display refresh rate even though the bars
-  themselves only change once per tick.
+  themselves only change once per tick. Drains the mouse accumulator once
+  per rendered frame and splits it evenly across however many ticks catch
+  up that frame -- draining per-tick meant a frame hiccup (GC pause, a busy
+  tab) dumped all the movement that piled up during the stall into the
+  first catch-up tick and left the rest at zero: one artificial spike
+  followed by nothing, from otherwise smooth mouse movement. Regression
+  test in `test/sim.test.mjs`.
 - `src/synctrace.js` -- rolling history of per-tick efficiency/gained
   samples, each annotated with a smoothed efficiency value (trailing
   ~12-tick window) for rendering, plus the raw sync-percent and
