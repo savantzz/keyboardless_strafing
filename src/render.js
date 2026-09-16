@@ -1,5 +1,6 @@
 // Scrolling per-tick sync bars: oldest on the left, most recent on the
-// right, bar height = that tick's speed-gain efficiency vs the theoretical
+// right, bar height = that tick's speed-gain efficiency (smoothed over a
+// short trailing window -- see synctrace.js for why) vs the theoretical
 // max for the speed you were at, color green (efficient) to red
 // (inefficient/no gain). This is the standard bhop/surf "sync" HUD, mapped
 // directly onto the physics engine's own accel/efficiency numbers.
@@ -34,13 +35,12 @@ export function renderSyncBars(ctx, { ticks, maxTicks, speed, syncPct, avgEffici
 
   ticks.forEach((tick, i) => {
     const x = (startIndex + i) * barWidth;
-    const pct = Math.max(0, Math.min(100, tick.efficiencyPct));
-    // No-gain ticks still get a visible, non-transparent sliver -- at high
-    // speed the vast majority of ticks fall in this bucket (the gain window
-    // narrows sharply as speed rises), and a near-invisible color there
-    // made it look like ticks were missing rather than just ungained.
-    const barH = tick.gained ? Math.max(3, (pct / 100) * maxBarHeight) : 3;
-    ctx.fillStyle = tick.gained ? efficiencyColor(pct) : '#7a1f1f';
+    // Smoothed value drives both height and color -- no hard gained/
+    // not-gained branch, so a single tremor-driven blip dents a bar rather
+    // than flipping it instantly between full-green and flat-red.
+    const pct = Math.max(0, Math.min(100, tick.smoothedEfficiencyPct));
+    const barH = Math.max(3, (pct / 100) * maxBarHeight);
+    ctx.fillStyle = efficiencyColor(pct);
     ctx.fillRect(x, baseline - barH, Math.max(1, barWidth - 1), barH);
   });
 

@@ -1,18 +1,33 @@
 // Per-tick "strafe sync" tracking, matching the standard bhop/surf HUD
 // metric: for each physics tick, did you gain speed (accel > 0) and how
 // close was that gain to the theoretical max for your speed that tick.
-// One tick = one bar. Since keyboardless strafing has no key press
-// defining the wish direction, a dip in this signal at a direction
-// reversal *is* the hesitation problem -- no separate smoothness heuristic
-// needed on top of it.
+//
+// The raw per-tick signal is real but too sharp to read at a glance: real
+// hand motion has brief micro-reversals (tremor) even during a sweep that
+// feels perfectly consistent, and because "gained" flips at a hard
+// threshold, a single-tick blip flips a bar from full-green to flat-red
+// rather than just denting it. Verified empirically (see conversation/
+// commit history) that a short window (3-5 ticks) barely helps -- it takes
+// something like a 12-tick (~180ms) trailing window to actually flatten
+// tremor-driven noise down to just the real underlying transitions, so
+// each pushed sample also carries a smoothed value over that window for
+// rendering. syncPercent()/averageEfficiencyPct() still use the raw values
+// -- they're already aggregates over many ticks, so smoothing first
+// wouldn't change them meaningfully, and raw is the more honest number.
 export class SyncTrace {
-  constructor({ maxTicks = 240 } = {}) {
+  constructor({ maxTicks = 240, smoothingWindow = 12 } = {}) {
     this.maxTicks = maxTicks;
-    this.ticks = []; // { efficiencyPct: number, gained: boolean }
+    this.smoothingWindow = smoothingWindow;
+    this.ticks = []; // { efficiencyPct, gained, smoothedEfficiencyPct }
   }
 
   push(sample) {
-    this.ticks.push(sample);
+    const entry = { ...sample };
+    const start = Math.max(0, this.ticks.length - this.smoothingWindow + 1);
+    const window = this.ticks.slice(start).concat(entry);
+    entry.smoothedEfficiencyPct = window.reduce((sum, t) => sum + t.efficiencyPct, 0) / window.length;
+
+    this.ticks.push(entry);
     if (this.ticks.length > this.maxTicks) this.ticks.shift();
   }
 
