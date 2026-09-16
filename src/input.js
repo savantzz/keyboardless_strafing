@@ -31,7 +31,27 @@ export class MouseInput {
   }
 
   _onClick() {
-    if (!this.locked) this.canvas.requestPointerLock();
+    if (this.locked) return;
+    // unadjustedMovement asks the browser/OS to skip the pointer's
+    // acceleration/sensitivity curve and hand back raw device deltas.
+    // Without it, movementX is the OS's *processed* pointer-position delta:
+    // non-linear except at exactly Windows' middle "pointer speed" setting,
+    // and subject to a documented Chromium bug where an occasional event
+    // reports a wildly-too-large delta (a cursor "teleport") even while the
+    // physical motion is steady. That bad value is baked in before it ever
+    // reaches this class, so no amount of accumulator/tick logic here can
+    // catch it -- it has to be avoided at the source. Not universally
+    // supported, so fall back to a plain lock if the browser rejects it.
+    let result;
+    try {
+      result = this.canvas.requestPointerLock({ unadjustedMovement: true });
+    } catch {
+      this.canvas.requestPointerLock();
+      return;
+    }
+    if (result && typeof result.catch === 'function') {
+      result.catch(() => this.canvas.requestPointerLock());
+    }
   }
 
   _onLockChange() {

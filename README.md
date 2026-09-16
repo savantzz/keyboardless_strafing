@@ -118,10 +118,11 @@ so it doesn't apply to keyboardless training at all.
   formula and the sheet's derived quantities (ideal angle, ideal yaw speed,
   wallstrafe variants, multi-tick projections). No DOM dependencies, so it's
   directly testable with `node test/physics.test.mjs`.
-- `src/input.js` -- Pointer Lock mouse capture. Mouse deltas are
-  accumulated with `getCoalescedEvents()` (so a high-polling-rate mouse
-  can't lose movement to event coalescing) and drained once per physics
-  tick.
+- `src/input.js` -- Pointer Lock mouse capture, requested with
+  `{ unadjustedMovement: true }` (see "Why lock requests ask for
+  unadjustedMovement" below). Mouse deltas are accumulated with
+  `getCoalescedEvents()` (so a high-polling-rate mouse can't lose movement
+  to event coalescing) and drained once per physics tick.
 - `src/sim.js` -- fixed-timestep accumulator loop: physics ticks run at a
   constant rate (default 66.667, i.e. CS:S 66-tick) independent of display
   refresh rate. Rendering hooks into a separate per-frame callback so the
@@ -139,6 +140,42 @@ so it doesn't apply to keyboardless training at all.
   average-efficiency stats.
 - `src/render.js` -- draws the sync bars and HUD.
 - `src/main.js` -- wires the above together and reads the settings panel.
+
+**Why lock requests ask for `unadjustedMovement`:** reported directly as
+"consistent mouse movement, but it randomly, sporadically misreads" it --
+re-audited `input.js`'s capture/accumulate/drain path line by line and
+found nothing wrong there (still true, and now covered by `sim.test.mjs`'s
+burst-distribution case). The actual cause is upstream of this app
+entirely: `movementX` from a plain `requestPointerLock()` is the *OS's
+processed* pointer-position delta, not a raw device count -- it passes
+through the platform's pointer-acceleration/sensitivity curve, which is
+non-linear at every setting except exactly Windows' middle "pointer speed"
+notch (a separate control from "Enhanced pointer precision," which was
+already ruled out). On top of that, Chromium has a documented bug where an
+occasional `mousemove` event reports a wildly-too-large delta -- a cursor
+"teleport" -- even while the physical motion is steady, which is a very
+close match for "consistent movement, sporadic misread." Real games avoid
+all of this with raw HID input (`m_rawinput 1` in Source). The fix is
+`canvas.requestPointerLock({ unadjustedMovement: true })`, a Chromium
+feature added specifically for gaming input so raw device deltas bypass
+the OS curve entirely; the app now requests it and falls back to a plain
+lock if the browser rejects the option. This could not have been found by
+staring harder at this repo's own code -- it's a browser/OS input-pipeline
+issue that only a plain ratio/accumulator audit can't see, since by the
+time `movementX` reaches JS the bad number is already baked in.
+
+**KSF/skill-surf default cvars:** asked directly what `sv_maxspeed` and
+`sv_airaccelerate` should default to, "as a base." `sv_airaccelerate 150`
+was already this trainer's default and is confirmed as the standard KSF
+(the competitive skill-surf server nearly all world records are set on)
+value on CS:GO -- CS:S-era KSF used 100, but CS:GO's air-accel physics
+don't behave identically, and 100 is considered too low for it now.
+`sv_maxspeed`, previously defaulted here to 260 (chosen only for
+`gainRange()` legibility, see above -- unrelated to any real convention),
+is set alongside `sv_airaccelerate 150` in KSF-style skill-surf configs at
+**320**, so the settings panel default now matches. The initial-speed
+slider (a training-scenario starting velocity, not a server cvar) is left
+at 260, independent of `sv_maxspeed`.
 
 ## Notes on the physics
 
