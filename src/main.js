@@ -2,12 +2,13 @@ import {
   DEFAULT_PARAMS,
   accelCap,
   applyAirAccelTick,
-  idealYawSpeedFor,
+  idealAngle,
+  vecLength,
 } from './physics.mjs';
 import { MouseInput } from './input.js';
 import { Simulation } from './sim.js';
-import { renderTrace } from './render.js';
-import { YawRateTrace, computeConsistencyStats } from './yawtrace.js';
+import { renderSyncBars } from './render.js';
+import { SyncTrace } from './synctrace.js';
 
 const canvas = document.getElementById('trace');
 const ctx = canvas.getContext('2d');
@@ -83,7 +84,7 @@ const state = {
 function resetState() {
   state.velocity = { x: Number(controls.initialVelocity.value), y: 0 };
   state.worldViewAngle = 0;
-  trace.samples.length = 0;
+  trace.clear();
 }
 
 const input = new MouseInput({
@@ -98,47 +99,47 @@ input.onLockChange = (locked) => {
   el('lockHint').classList.toggle('locked', locked);
 };
 
-const trace = new YawRateTrace({ windowMs: 4000 });
-let lastContinuousYaw = 0;
-let lastFrameTime = null;
+const trace = new SyncTrace({ maxTicks: 240 });
 
-// Physics ticks: authoritative velocity simulation, unchanged rate
-// regardless of display refresh.
+// Physics ticks: authoritative velocity simulation. Sync is scored per
+// tick (one bar = one tick), comparing the actual speed gain against the
+// theoretical max achievable from the same starting speed/angle -- reusing
+// the same applyAirAccelTick the live simulation uses, not a separate
+// formula, so "max possible" always reflects the current settings exactly.
 function onTick(dt, yawDelta) {
   const params = readParams();
+  const startSpeed = vecLength(state.velocity);
+  const startAngle = Math.atan2(state.velocity.y, state.velocity.x);
+
   state.worldViewAngle += yawDelta;
   const result = applyAirAccelTick(state.velocity, state.worldViewAngle, params);
   state.velocity = result.velocity;
+
+  const cap = accelCap(params);
+  const idealA = idealAngle(startSpeed, params.airMaxSpeed, cap);
+  const best = applyAirAccelTick(
+    { x: startSpeed * Math.cos(startAngle), y: startSpeed * Math.sin(startAngle) },
+    startAngle + idealA,
+    params,
+  );
+  const maxGain = best.speed - startSpeed;
+  const actualGain = result.speed - startSpeed;
+  const efficiencyPct = maxGain > 1e-9 ? Math.max(0, (actualGain / maxGain) * 100) : actualGain >= 0 ? 100 : 0;
+
+  trace.push({ efficiencyPct, gained: result.accel > 0 });
 }
 
-// Render frames: run every animation frame independent of tick rate, so the
-// trace is smooth even on high-refresh displays where most frames wouldn't
-// otherwise contain a tick.
-function onFrame(nowMs) {
-  if (lastFrameTime === null) lastFrameTime = nowMs;
-  const dt = (nowMs - lastFrameTime) / 1000;
-  lastFrameTime = nowMs;
-
-  const continuousYaw = input.continuousYawRad();
-  const rateRadPerSec = dt > 0 ? (continuousYaw - lastContinuousYaw) / dt : 0;
-  lastContinuousYaw = continuousYaw;
-  const rateDeg = (rateRadPerSec * 180) / Math.PI;
-  trace.push(nowMs, rateDeg);
-
-  const params = readParams();
-  const speed = Math.hypot(state.velocity.x, state.velocity.y);
-  const cap = accelCap(params);
-  const targetRad = idealYawSpeedFor(speed, params.airMaxSpeed, cap, params.tickRate);
-  const targetDeg = (targetRad * 180) / Math.PI;
-
-  const stats = computeConsistencyStats(trace.samples, targetDeg);
-  renderTrace(ctx, {
-    samples: trace.samples,
-    targetDeg,
-    stutterEvents: stats.stutterEvents,
-    nowMs,
-    windowMs: trace.windowMs,
-    stats: { ...stats, speed },
+// Rendering runs every animation frame (not just on tick) so the numeric
+// readouts stay live even between ticks; the bars themselves only change
+// when a new tick lands.
+function onFrame() {
+  const speed = vecLength(state.velocity);
+  renderSyncBars(ctx, {
+    ticks: trace.ticks,
+    maxTicks: trace.maxTicks,
+    speed,
+    syncPct: trace.syncPercent(),
+    avgEfficiencyPct: trace.averageEfficiencyPct(),
   });
 }
 

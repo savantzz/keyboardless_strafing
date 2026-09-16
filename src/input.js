@@ -11,10 +11,6 @@ export class MouseInput {
     this.sensitivity = sensitivity; // in-game "sensitivity" cvar
     this.mYaw = mYaw; // in-game m_yaw cvar, degrees per mouse count (default 0.022)
     this.accumCounts = 0; // drained once per physics tick (resets)
-    this.totalCounts = 0; // never resets -- lets the render loop sample a
-    // continuous angle every animation frame instead of waiting on a tick,
-    // which is what was causing visible stutter on displays refreshing
-    // faster than the ~66Hz physics tick.
     this.locked = false;
     this.onLockChange = null; // optional callback(locked: boolean)
     this._onMouseMove = this._onMouseMove.bind(this);
@@ -56,7 +52,6 @@ export class MouseInput {
     const source = events && events.length ? events : [e];
     for (const ev of source) {
       this.accumCounts += ev.movementX;
-      this.totalCounts += ev.movementX;
     }
   }
 
@@ -65,18 +60,8 @@ export class MouseInput {
   drainYawDelta() {
     const counts = this.accumCounts;
     this.accumCounts = 0;
-    return this._countsToRad(counts);
-  }
-
-  // Total accumulated yaw (radians) since this input was created. Never
-  // resets -- sample it every render frame for smooth, tick-independent
-  // visuals (the physics tick loop uses drainYawDelta() instead).
-  continuousYawRad() {
-    return this._countsToRad(this.totalCounts);
-  }
-
-  _countsToRad(counts) {
-    return counts * this.sensitivity * this.mYaw * (Math.PI / 180);
+    const degrees = counts * this.sensitivity * this.mYaw;
+    return degrees * (Math.PI / 180);
   }
 }
 
@@ -87,17 +72,11 @@ export class ScriptedInput {
   constructor(yawDeltaFn) {
     this.yawDeltaFn = yawDeltaFn;
     this.tick = 0;
-    this.total = 0;
   }
 
   drainYawDelta() {
     const v = this.yawDeltaFn(this.tick);
     this.tick += 1;
-    this.total += v;
     return v;
-  }
-
-  continuousYawRad() {
-    return this.total;
   }
 }

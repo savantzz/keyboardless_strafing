@@ -1,93 +1,58 @@
-// Primary visualization: a scrolling strip chart of the player's actual
-// angular velocity (deg/s) against the ideal target rate, oldest on the
-// left, now on the right. Color encodes how close to target the trace is;
-// shaded red bands mark detected "stutter" events (hesitating/pausing
-// through a direction change instead of reversing smoothly).
+// Scrolling per-tick sync bars: oldest on the left, most recent on the
+// right, bar height = that tick's speed-gain efficiency vs the theoretical
+// max for the speed you were at, color green (efficient) to red
+// (inefficient/no gain). This is the standard bhop/surf "sync" HUD, mapped
+// directly onto the physics engine's own accel/efficiency numbers.
 function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-// Green (on target) -> red (far off), via HSL.
-function errorColor(err) {
-  const hue = lerp(140, 0, Math.min(1, err));
-  return `hsl(${hue}, 85%, 55%)`;
+function efficiencyColor(pct) {
+  const t = Math.max(0, Math.min(1, pct / 100));
+  const hue = lerp(0, 140, t); // red -> green
+  return `hsl(${hue}, 85%, 52%)`;
 }
 
-export function renderTrace(ctx, { samples, targetDeg, stutterEvents, nowMs, windowMs, stats }) {
+export function renderSyncBars(ctx, { ticks, maxTicks, speed, syncPct, avgEfficiencyPct }) {
   const { canvas } = ctx;
   const w = canvas.width;
   const h = canvas.height;
   ctx.clearRect(0, 0, w, h);
 
-  const maxDeg = Math.max(targetDeg * 1.6, 40);
-  const originY = h / 2;
-  const scaleY = (h / 2 - 24) / maxDeg;
-  const t0 = nowMs - windowMs;
-  const mapX = (t) => ((t - t0) / windowMs) * w;
-  const mapY = (rate) => originY - rate * scaleY;
+  const baseline = h - 40;
+  const maxBarHeight = baseline - 40;
+  const barWidth = w / maxTicks;
+  const startIndex = maxTicks - ticks.length;
 
-  // Stutter bands (drawn first, behind everything).
-  ctx.fillStyle = 'rgba(255, 70, 70, 0.14)';
-  for (const ev of stutterEvents) {
-    const x0 = Math.max(0, mapX(ev.start));
-    const x1 = Math.min(w, mapX(ev.end));
-    if (x1 > x0) ctx.fillRect(x0, 0, x1 - x0, h);
-  }
-
-  // Zero line.
-  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  // Baseline.
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(0, originY);
-  ctx.lineTo(w, originY);
+  ctx.moveTo(0, baseline);
+  ctx.lineTo(w, baseline);
   ctx.stroke();
 
-  // Target reference lines (+/- target, since direction alternates).
-  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-  ctx.setLineDash([5, 5]);
-  for (const sign of [1, -1]) {
-    const y = mapY(sign * targetDeg);
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(w, y);
-    ctx.stroke();
-  }
-  ctx.setLineDash([]);
+  ticks.forEach((tick, i) => {
+    const x = (startIndex + i) * barWidth;
+    const pct = Math.max(0, Math.min(100, tick.efficiencyPct));
+    const barH = tick.gained ? Math.max(2, (pct / 100) * maxBarHeight) : 2;
+    ctx.fillStyle = tick.gained ? efficiencyColor(pct) : 'rgba(255,70,70,0.7)';
+    ctx.fillRect(x, baseline - barH, Math.max(1, barWidth - 1), barH);
+  });
 
-  // The trace itself, segment-colored by instantaneous error vs target.
-  ctx.lineWidth = 2.5;
-  ctx.lineCap = 'round';
-  for (let i = 1; i < samples.length; i++) {
-    const a = samples[i - 1];
-    const b = samples[i];
-    const errA = Math.min(1, Math.abs(Math.abs(a.rateDeg) - targetDeg) / Math.max(targetDeg, 1e-6));
-    const errB = Math.min(1, Math.abs(Math.abs(b.rateDeg) - targetDeg) / Math.max(targetDeg, 1e-6));
-    ctx.strokeStyle = errorColor((errA + errB) / 2);
-    ctx.beginPath();
-    ctx.moveTo(mapX(a.t), mapY(a.rateDeg));
-    ctx.lineTo(mapX(b.t), mapY(b.rateDeg));
-    ctx.stroke();
-  }
-
-  // Leading dot at the current sample.
-  if (samples.length) {
-    const last = samples[samples.length - 1];
-    const err = Math.min(1, Math.abs(Math.abs(last.rateDeg) - targetDeg) / Math.max(targetDeg, 1e-6));
-    ctx.fillStyle = errorColor(err);
-    ctx.beginPath();
-    ctx.arc(mapX(last.t), mapY(last.rateDeg), 4, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Minimal HUD, top-left.
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  ctx.font = '12px "SF Mono", "Cascadia Code", monospace';
+  // Big headline sync number, top-left.
   ctx.textBaseline = 'top';
-  const liveRate = samples.length ? Math.abs(samples[samples.length - 1].rateDeg) : 0;
-  const lines = [
-    `speed  ${stats.speed?.toFixed(0) ?? '-'} u/s`,
-    `target ${targetDeg.toFixed(0)} deg/s   actual ${liveRate.toFixed(0)} deg/s`,
-    `consistency ${stats.scorePct?.toFixed(0) ?? '0'}%   streak ${(stats.streakMs / 1000).toFixed(1)}s`,
-  ];
-  lines.forEach((line, i) => ctx.fillText(line, 12, 10 + i * 16));
+  ctx.fillStyle = efficiencyColor(syncPct);
+  ctx.font = '600 32px -apple-system, "Segoe UI", sans-serif';
+  ctx.fillText(`${syncPct.toFixed(0)}%`, 16, 14);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = '11px -apple-system, "Segoe UI", sans-serif';
+  ctx.fillText('SYNC', 16, 52);
+
+  ctx.textBaseline = 'bottom';
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.font = '12px "SF Mono", "Cascadia Code", monospace';
+  ctx.fillText(`avg efficiency  ${avgEfficiencyPct.toFixed(0)}%`, 16, h - 20);
+  ctx.fillText(`speed  ${speed.toFixed(0)} u/s`, 16, h - 4);
 }
