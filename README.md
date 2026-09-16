@@ -8,11 +8,25 @@ engine. The model is ported from a reference Desmos sheet and verified in
 ## Run it
 
 ```sh
-python3 -m http.server 8000
+python3 serve.py 8000
 # open http://localhost:8000
 ```
 
 Click the canvas to lock the pointer, then move the mouse to strafe.
+
+**Use `serve.py`, not plain `python3 -m http.server`.** Reported directly: after
+pulling an update, the page went completely black with dead buttons and no
+visible error. Root cause -- `http.server` sends no `Cache-Control` header at
+all, so Chrome can silently keep serving an old cached copy of `physics.mjs`
+or `input.js` after a `git pull` without even asking the server for the new
+one (confirmed: the dev server's own request log was missing those files
+entirely). `main.js` then fails to import a since-added export from the
+stale module, which throws before any of `main.js` runs -- canvas never gets
+sized, no listeners get attached. `serve.py` is the same `http.server` with
+one difference, a `Cache-Control: no-store, must-revalidate` header on every
+response, so a normal reload after `git pull` always gets the current files.
+If you're ever stuck on plain `http.server`, a hard refresh
+(Ctrl+Shift+R / Ctrl+F5) works around it for that one load.
 
 The trainer's core visual is a scrolling bar chart -- one bar per game
 tick, height and color driven by a min-max-normalized "quality" score for
