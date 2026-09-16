@@ -163,11 +163,37 @@ export function gainRange(speed, airMaxSpeed) {
 //
 // This matches the sheet's own branch condition (airMaxSpeed vs accelCap)
 // and every numeric example in it.
+// The accel-clamp boundary angle itself (the sheet's own `A_cap`, confirmed
+// letter-for-letter against the sheet: cos^-1((airMaxSpeed - accelCap) / speed)).
+// Exposed standalone since it's also the correct capped-branch optimum for
+// both the free-strafe and wallstrafe objectives (see idealWallAngle).
+export function capBoundaryAngle(speed, airMaxSpeed, cap) {
+  return Math.acos(clamp((airMaxSpeed - cap) / speed, -1, 1));
+}
+
 export function idealAngle(speed, airMaxSpeed, cap) {
   if (airMaxSpeed <= cap) {
     return Math.PI / 2;
   }
-  return Math.acos(clamp((airMaxSpeed - cap) / speed, -1, 1));
+  return capBoundaryAngle(speed, airMaxSpeed, cap);
+}
+
+// The velocity vector's own max rotation this tick (v_angle) when aimed at
+// the capped-regime optimum. Matches the sheet's `A_caprange`: at A_cap,
+// addSpeed(A_cap) == cap by construction, so accel == cap exactly.
+export function maxTickRotationAtCapBoundary(speed, airMaxSpeed, cap) {
+  const A = capBoundaryAngle(speed, airMaxSpeed, cap);
+  const vNew = Math.sqrt((speed + cap * Math.cos(A)) ** 2 + (cap * Math.sin(A)) ** 2);
+  return Math.asin(clamp((cap * Math.sin(A)) / vNew, -1, 1));
+}
+
+// Total yaw rate (rad/s) needed to hold a stable oscillating strafe once at
+// the speed where further strafing at the ideal angle no longer nets a
+// speed gain -- i.e. turning the full +idealAngle to -idealAngle sweep each
+// half-cycle. Matches the sheet's `A_v` (2 * the one-directional ideal yaw
+// speed).
+export function stableOscillationYawSpeed(speed, airMaxSpeed, tickRate) {
+  return 2 * idealYawSpeedUncapped(speed, airMaxSpeed, tickRate);
 }
 
 // Same derivation restricted to the wallstrafe objective (maximize speed +
@@ -180,5 +206,5 @@ export function idealWallAngle(speed, airMaxSpeed, cap) {
   if (airMaxSpeed / 2 <= cap) {
     return Math.acos(clamp(airMaxSpeed / (2 * speed), -1, 1));
   }
-  return Math.acos(clamp((airMaxSpeed - cap) / speed, -1, 1));
+  return capBoundaryAngle(speed, airMaxSpeed, cap);
 }

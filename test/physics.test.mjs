@@ -20,6 +20,9 @@ import {
   gainRange,
   idealAngle,
   idealWallAngle,
+  capBoundaryAngle,
+  maxTickRotationAtCapBoundary,
+  stableOscillationYawSpeed,
 } from '../src/physics.mjs';
 
 const params = { ...DEFAULT_PARAMS }; // groundMaxSpeed 260, airMaxSpeed 30, tickRate 66.667, airAccelerate 150, penalty 1
@@ -69,5 +72,15 @@ approx(idealWallAngle(1600, 30, cap), 1.56142118946, 'idealWallAngle (uncapped b
   const addSpeedAtOptimum = 30 - 1600 * Math.cos(A);
   approx(addSpeedAtOptimum, lowCap, 'addSpeed at capped-branch optimum equals accelCap');
 }
+
+// Literal confirmation against the sheet's own A_cap / A_caprange / A_v
+// expressions (found in a later part of the sheet than the values above),
+// evaluated at the sheet's default 585 accelCap even though that's not the
+// branch that would actually be selected for it (M <= accelCap there) --
+// the sheet defines A_cap as a standalone formula independent of the branch
+// condition, so it's directly comparable.
+approx(capBoundaryAngle(1600, 30, cap), 1.92503349754, 'capBoundaryAngle matches sheet A_cap literally');
+approx(maxTickRotationAtCapBoundary(1600, 30, cap), 0.374225736221, 'maxTickRotationAtCapBoundary matches sheet A_caprange');
+approx(stableOscillationYawSpeed(1600, 30, params.tickRate), 2.50014650755, 'stableOscillationYawSpeed matches sheet A_v');
 
 console.log('All physics regression checks passed.');
