@@ -179,9 +179,31 @@ at 260, independent of `sv_maxspeed`.
 
 ## Notes on the physics
 
+- **Directly verified against Valve's actual shipped source, not just a
+  fan-made recreation.** The user's uploaded PDF (Mikko Peltola's thesis
+  "Replicating Source Engine Air Strafing in Unity") was the paper the
+  earlier-blocked theseus.fi link and Reddit thread led back to. Its own
+  pseudocode reuses one `wishspeed` variable for both the addspeed check
+  *and* the accelspeed line -- meaning after it clamps that variable to
+  `maxAirWishSpeed` (30) for the check, the same clamped value also feeds
+  accelspeed, silently losing the distinction the real engine relies on.
+  Fetched the actual `CGameMovement::AirAccelerate` from
+  [`ValveSoftware/source-sdk-2013`](https://github.com/ValveSoftware/source-sdk-2013/blob/master/mp/src/game/shared/gamemovement.cpp)
+  directly to check: it keeps a *separate* local, `wishspd`, capped to 30
+  for the addspeed check only, while `accelspeed = accel * wishspeed *
+  frametime * m_surfaceFriction` keeps using the original, uncapped
+  parameter -- which `AirMove` clamps to `mv->m_flMaxSpeed` (`sv_maxspeed`),
+  not 30. That's exactly what this codebase's `accelCap = groundMaxSpeed *
+  penalty * airAccelerate * tickInterval` already does (`penalty` standing
+  in for `m_surfaceFriction`) -- confirmed against Valve's own code, not
+  just the reference Desmos sheet. It also means `sv_maxspeed` isn't only a
+  ground-speed/ramp-entry cap: it directly scales the air-acceleration rate
+  itself, which is exactly why KSF-style skill-surf configs deliberately
+  raise it to 320 rather than leaving it at a lower "just enough to walk"
+  value.
 - `airMaxSpeed` (30 u/s) is the hardcoded air-wishspeed cap used only during
   air acceleration -- distinct from `sv_maxspeed` (ground speed, default
-  260), which is what actually determines `accelcap` each tick.
+  320), which is what actually determines `accelcap` each tick.
 - The optimal strafe angle (`idealAngle` in `physics.mjs`) is derived
   analytically, not guessed: maximizing resultant speed under the engine's
   accel clamp gives exactly 90 degrees relative to your velocity when
