@@ -68,10 +68,20 @@ function saveSettings() {
   }
 }
 
+// A saved value from a browser session predating a default change (e.g.
+// sv_maxspeed 260 -> 320 for the KSF convention) otherwise silently wins
+// over the new HTML default forever -- restoring settings is supposed to
+// preserve what a user deliberately chose, not pin them to a value they
+// never actually picked. Only skip restoring a field if it's still sitting
+// exactly on the superseded default; anything the user actually changed is
+// untouched.
+const SUPERSEDED_DEFAULTS = { groundMaxSpeed: '260' };
+
 const saved = loadSavedSettings();
 if (saved) {
   for (const id of RANGE_IDS) {
     if (saved[id] === undefined) continue;
+    if (SUPERSEDED_DEFAULTS[id] !== undefined && String(saved[id]) === SUPERSEDED_DEFAULTS[id]) continue;
     controls[id].value = saved[id];
     numEl(id).value = saved[id];
   }
