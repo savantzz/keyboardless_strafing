@@ -99,6 +99,14 @@ export function idealYawSpeedCapped(speed, airMaxSpeed, cap, tickRate) {
   return Math.asin(clamp((cap - airMaxSpeed) / speed, -1, 1)) * tickRate;
 }
 
+// Picks the correct one-directional ideal yaw speed (rad/s) for the current
+// regime, using the same branch condition as idealAngle.
+export function idealYawSpeedFor(speed, airMaxSpeed, cap, tickRate) {
+  return airMaxSpeed <= cap
+    ? idealYawSpeedUncapped(speed, airMaxSpeed, tickRate)
+    : idealYawSpeedCapped(speed, airMaxSpeed, cap, tickRate);
+}
+
 // Combined "perfect last strafe" yaw speed: catch up to the cap, then finish at max-speed angle.
 export function perfectLastStrafeYawSpeed(speed, airMaxSpeed, cap, tickRate) {
   const capped = Math.asin(clamp((cap - airMaxSpeed) / speed, -1, 1)) * tickRate;

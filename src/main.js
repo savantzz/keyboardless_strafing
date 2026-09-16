@@ -2,15 +2,23 @@ import {
   DEFAULT_PARAMS,
   accelCap,
   applyAirAccelTick,
-  idealAngle,
-  vecLength,
+  idealYawSpeedFor,
 } from './physics.mjs';
 import { MouseInput } from './input.js';
 import { Simulation } from './sim.js';
-import { render } from './render.js';
+import { renderTrace } from './render.js';
+import { YawRateTrace, computeConsistencyStats } from './yawtrace.js';
 
-const canvas = document.getElementById('gauge');
+const canvas = document.getElementById('trace');
 const ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
 
 const el = (id) => document.getElementById(id);
 
@@ -21,7 +29,6 @@ const controls = {
   groundMaxSpeed: el('groundMaxSpeed'),
   sensitivity: el('sensitivity'),
   mYaw: el('mYaw'),
-  tolerance: el('tolerance'),
   penaltyCrouch: el('penaltyCrouch'),
   penaltyWalk: el('penaltyWalk'),
   penaltyZ: el('penaltyZ'),
@@ -33,12 +40,12 @@ const controls = {
 const PENALTY_MIN = { crouch: 88.4 / 260, walk: 135.2 / 260, z: 1 / 4, moveup: 203.026 / 260 };
 
 function currentPenalty() {
-  const p =
+  return (
     (controls.penaltyCrouch.checked ? PENALTY_MIN.crouch : 1) *
     (controls.penaltyWalk.checked ? PENALTY_MIN.walk : 1) *
     (controls.penaltyZ.checked ? PENALTY_MIN.z : 1) *
-    (controls.penaltyMoveup.checked ? PENALTY_MIN.moveup : 1);
-  return p;
+    (controls.penaltyMoveup.checked ? PENALTY_MIN.moveup : 1)
+  );
 }
 
 function readParams() {
@@ -54,15 +61,12 @@ function readParams() {
 const state = {
   velocity: { x: Number(controls.initialVelocity.value), y: 0 },
   worldViewAngle: 0,
-  ticks: 0,
-  efficiencySum: 0,
 };
 
 function resetState() {
   state.velocity = { x: Number(controls.initialVelocity.value), y: 0 };
   state.worldViewAngle = 0;
-  state.ticks = 0;
-  state.efficiencySum = 0;
+  trace.samples.length = 0;
 }
 
 const input = new MouseInput({
@@ -72,49 +76,56 @@ const input = new MouseInput({
 input.attach(canvas);
 input.onLockChange = (locked) => {
   el('lockHint').textContent = locked
-    ? 'Pointer locked -- move the mouse to strafe. Press Esc to release.'
-    : 'Click the gauge to lock the pointer and start strafing.';
+    ? 'Locked -- move the mouse to strafe. Esc to release.'
+    : 'Click to lock the mouse and start.';
+  el('lockHint').classList.toggle('locked', locked);
 };
 
-let latestView = {};
+const trace = new YawRateTrace({ windowMs: 4000 });
+let lastContinuousYaw = 0;
+let lastFrameTime = null;
 
+// Physics ticks: authoritative velocity simulation, unchanged rate
+// regardless of display refresh.
 function onTick(dt, yawDelta) {
   const params = readParams();
-  const startSpeed = vecLength(state.velocity);
-  const startAngle = Math.atan2(state.velocity.y, state.velocity.x);
-
   state.worldViewAngle += yawDelta;
   const result = applyAirAccelTick(state.velocity, state.worldViewAngle, params);
   state.velocity = result.velocity;
-
-  const cap = accelCap(params);
-  const idealA = idealAngle(startSpeed, params.airMaxSpeed, cap);
-  const best = applyAirAccelTick(
-    { x: startSpeed * Math.cos(startAngle), y: startSpeed * Math.sin(startAngle) },
-    startAngle + idealA,
-    params,
-  );
-  const maxGain = best.speed - startSpeed;
-  const actualGain = result.speed - startSpeed;
-  const efficiency = maxGain > 1e-9 ? actualGain / maxGain : actualGain >= 0 ? 1 : 0;
-  const efficiencyPct = Math.max(-100, Math.min(100, efficiency * 100));
-
-  state.ticks += 1;
-  state.efficiencySum += efficiencyPct;
-
-  latestView = {
-    speed: result.speed,
-    aimAngle: result.A,
-    idealAngle: idealA,
-    toleranceRad: (Number(controls.tolerance.value) * Math.PI) / 180,
-    angleErrorDeg: (Math.abs(Math.abs(result.A) - idealA) * 180) / Math.PI,
-    efficiencyPct,
-    avgEfficiencyPct: state.efficiencySum / state.ticks,
-  };
-  render(ctx, latestView);
 }
 
-const sim = new Simulation({ tickRate: Number(controls.tickRate.value), onTick, input });
+// Render frames: run every animation frame independent of tick rate, so the
+// trace is smooth even on high-refresh displays where most frames wouldn't
+// otherwise contain a tick.
+function onFrame(nowMs) {
+  if (lastFrameTime === null) lastFrameTime = nowMs;
+  const dt = (nowMs - lastFrameTime) / 1000;
+  lastFrameTime = nowMs;
+
+  const continuousYaw = input.continuousYawRad();
+  const rateRadPerSec = dt > 0 ? (continuousYaw - lastContinuousYaw) / dt : 0;
+  lastContinuousYaw = continuousYaw;
+  const rateDeg = (rateRadPerSec * 180) / Math.PI;
+  trace.push(nowMs, rateDeg);
+
+  const params = readParams();
+  const speed = Math.hypot(state.velocity.x, state.velocity.y);
+  const cap = accelCap(params);
+  const targetRad = idealYawSpeedFor(speed, params.airMaxSpeed, cap, params.tickRate);
+  const targetDeg = (targetRad * 180) / Math.PI;
+
+  const stats = computeConsistencyStats(trace.samples, targetDeg);
+  renderTrace(ctx, {
+    samples: trace.samples,
+    targetDeg,
+    stutterEvents: stats.stutterEvents,
+    nowMs,
+    windowMs: trace.windowMs,
+    stats: { ...stats, speed },
+  });
+}
+
+const sim = new Simulation({ tickRate: Number(controls.tickRate.value), onTick, onFrame, input });
 
 controls.tickRate.addEventListener('input', () => sim.setTickRate(Number(controls.tickRate.value)));
 controls.sensitivity.addEventListener('input', () => (input.sensitivity = Number(controls.sensitivity.value)));
@@ -127,9 +138,8 @@ for (const [id, out] of [
   ['groundMaxSpeed', 'groundMaxSpeedOut'],
   ['sensitivity', 'sensitivityOut'],
   ['mYaw', 'mYawOut'],
-  ['tolerance', 'toleranceOut'],
 ]) {
-  const input_ = controls[id] ?? el(id);
+  const input_ = controls[id];
   const output = el(out);
   const sync = () => (output.textContent = input_.value);
   input_.addEventListener('input', sync);
@@ -138,5 +148,8 @@ for (const [id, out] of [
 
 el('resetBtn').addEventListener('click', resetState);
 
-render(ctx, latestView);
+const settingsToggle = el('settingsToggle');
+const settingsPanel = el('panel');
+settingsToggle.addEventListener('click', () => settingsPanel.classList.toggle('open'));
+
 sim.start();

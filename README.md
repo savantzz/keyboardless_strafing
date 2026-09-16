@@ -12,11 +12,19 @@ python3 -m http.server 8000
 # open http://localhost:8000
 ```
 
-Click the gauge to lock the pointer, then move the mouse to strafe. The
-gauge shows your current aim angle relative to your velocity (red/green
-line), the analytically-optimal target angle (green dashed zone, both
-directions), and live/average strafe efficiency versus the theoretical max
-speed gain for your current speed.
+Click the canvas to lock the pointer, then move the mouse to strafe.
+
+The trainer's core visual is a scrolling strip chart of your actual angular
+velocity (deg/s) against the ideal target rate for your current speed. For
+keyboardless strafing there's no key press defining a wish direction -- the
+whole skill is smoothly reversing your mouse's turn rate instead of pausing
+or jerking through each direction change. So rather than a static "aim
+here" gauge, the chart shows that turn-rate signal directly: a clean trace
+means consistent turning, a dip toward zero that lingers gets flagged as a
+"stutter" (shaded red band) -- exactly the hesitation-at-the-reversal
+problem that's hard to feel in the moment but easy to see on a graph.
+Settings (tickrate, sv_airaccelerate, sensitivity, m_yaw, air-accel
+penalties) are behind the gear icon, top right.
 
 ## How it works
 
@@ -24,15 +32,23 @@ speed gain for your current speed.
   formula and the sheet's derived quantities (ideal angle, ideal yaw speed,
   wallstrafe variants, multi-tick projections). No DOM dependencies, so it's
   directly testable with `node test/physics.test.mjs`.
-- `src/input.js` -- Pointer Lock mouse capture. Mouse deltas are
-  accumulated with `getCoalescedEvents()` and drained once per simulation
-  tick, not once per rendered frame, matching how the game itself samples
-  input.
+- `src/input.js` -- Pointer Lock mouse capture. Tracks two things from the
+  same raw mouse deltas: a tick-accumulated delta (drained once per physics
+  tick, for the velocity simulation) and a never-reset continuous total
+  (sampled every render frame, for smooth on-screen motion). Deltas are
+  captured with `getCoalescedEvents()` so a high-polling-rate mouse can't
+  lose movement to event coalescing.
 - `src/sim.js` -- fixed-timestep accumulator loop: physics ticks run at a
   constant rate (default 66.67, i.e. CS:S 66-tick) independent of display
-  refresh rate.
-- `src/render.js` -- canvas gauge + HUD.
-- `src/main.js` -- wires the above together and reads the control panel.
+  refresh rate. Rendering hooks into a separate per-frame callback so the
+  display updates at full refresh rate even though physics ticks less often
+  -- mixing the two was the cause of visible stutter in an earlier version.
+- `src/yawtrace.js` -- rolling history of angular-velocity samples plus the
+  consistency scoring: mean error vs. the target rate, and detection of
+  "stutter" events (turn rate dropping near zero for longer than a brief
+  natural zero-crossing).
+- `src/render.js` -- draws the strip chart and HUD.
+- `src/main.js` -- wires the above together and reads the settings panel.
 
 ## Notes on the physics
 

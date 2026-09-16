@@ -8,8 +8,15 @@
 <link rel="icon" href="data:," />
 </head>
 <body>
+  <div id="stage">
+    <canvas id="trace"></canvas>
+    <div id="lockHint">Click to lock the mouse and start.</div>
+  </div>
+
+  <button id="settingsToggle" title="Settings" aria-label="Settings">&#9881;</button>
+
   <div id="panel">
-    <h1>Strafing Trainer</h1>
+    <h1>Settings</h1>
 
     <fieldset>
       <legend>Movement</legend>
@@ -47,11 +54,6 @@
         <input id="mYaw" type="range" min="0.001" max="0.05" step="0.001" value="0.022" />
         <output id="mYawOut"></output>
       </div>
-      <div class="field">
-        <label for="tolerance">target tolerance (deg)</label>
-        <input id="tolerance" type="range" min="0.1" max="10" step="0.1" value="2" />
-        <output id="toleranceOut"></output>
-      </div>
     </fieldset>
 
     <fieldset>
@@ -64,11 +66,6 @@
 
     <button id="resetBtn">Reset</button>
   </div>
-
-  <div id="stage">
-    <canvas id="gauge" width="480" height="480"></canvas>
-  </div>
-  <div id="lockHint">Click the gauge to lock the pointer and start strafing.</div>
 
   <script type="module" src="src/main.js"></script>
 </body>

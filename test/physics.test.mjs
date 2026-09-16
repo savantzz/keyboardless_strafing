@@ -12,6 +12,7 @@ import {
   maxSpeedGainUncapped,
   idealYawSpeedUncapped,
   idealYawSpeedCapped,
+  idealYawSpeedFor,
   perfectLastStrafeYawSpeed,
   wallstrafeSpeed,
   maxWallstrafeGain,
@@ -47,6 +48,7 @@ approx(result.vAngle, 0.372644768967, 'v_angle');
 approx(maxSpeedGainUncapped(1600, 30), 0.281225285106, 'maxSpeedGainUncapped');
 approx(idealYawSpeedUncapped(1600, 30, params.tickRate), 1.25007325378, 'idealYawSpeedUncapped');
 approx(idealYawSpeedCapped(1600, 30, cap, params.tickRate), 23.615811383, 'idealYawSpeedCapped');
+approx(idealYawSpeedFor(1600, 30, cap, params.tickRate), 1.25007325378, 'idealYawSpeedFor (uncapped branch)');
 approx(perfectLastStrafeYawSpeed(1600, 30, cap, params.tickRate), 24.86610446, 'perfectLastStrafeYawSpeed');
 approx(wallstrafeSpeed(1600, result.accel, wishDirRad), 1337.87693456, 'wallstrafeSpeed');
 approx(maxWallstrafeGain(1600, 30), 0.140625, 'maxWallstrafeGain');

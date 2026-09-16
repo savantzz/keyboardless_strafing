@@ -2,9 +2,13 @@
 // (matching the game's tickrate) regardless of display refresh rate, so
 // simulation timing never drifts with monitor Hz or frame drops.
 export class Simulation {
-  constructor({ tickRate, onTick, input }) {
+  constructor({ tickRate, onTick, onFrame, input }) {
     this.setTickRate(tickRate);
     this.onTick = onTick; // (tickIntervalSeconds, yawDeltaRadians) => void
+    // Fires once per animation frame regardless of how many (or few) ticks
+    // ran this frame -- use this for rendering, not onTick, so the display
+    // updates at full refresh rate instead of being gated to the tick rate.
+    this.onFrame = onFrame; // (nowMs) => void
     this.input = input; // anything with drainYawDelta()
     this.accumulator = 0;
     this.lastTime = null;
@@ -45,6 +49,7 @@ export class Simulation {
       this.onTick(this.tickInterval, yawDelta);
       this.accumulator -= this.tickInterval;
     }
+    if (this.onFrame) this.onFrame(now);
     this._rafHandle = requestAnimationFrame(this._raf);
   }
 }

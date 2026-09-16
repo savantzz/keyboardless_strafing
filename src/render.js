@@ -1,102 +1,93 @@
-// Renders one tick's state as an angle gauge: 0 deg (straight up) is the
-// current velocity direction, matching the reference Desmos sheet's own
-// convention of drawing the velocity vector vertically. Angles are measured
-// clockwise from up, so the gauge angle for a wish direction A (radians,
-// relative to velocity) is drawn at screen angle A directly.
-const TAU = Math.PI * 2;
-
-function polar(angleRad, radius) {
-  return { x: radius * Math.sin(angleRad), y: -radius * Math.cos(angleRad) };
+// Primary visualization: a scrolling strip chart of the player's actual
+// angular velocity (deg/s) against the ideal target rate, oldest on the
+// left, now on the right. Color encodes how close to target the trace is;
+// shaded red bands mark detected "stutter" events (hesitating/pausing
+// through a direction change instead of reversing smoothly).
+function lerp(a, b, t) {
+  return a + (b - a) * t;
 }
 
-function deg(rad) {
-  return (rad * 180) / Math.PI;
+// Green (on target) -> red (far off), via HSL.
+function errorColor(err) {
+  const hue = lerp(140, 0, Math.min(1, err));
+  return `hsl(${hue}, 85%, 55%)`;
 }
 
-export function render(ctx, view) {
+export function renderTrace(ctx, { samples, targetDeg, stutterEvents, nowMs, windowMs, stats }) {
   const { canvas } = ctx;
   const w = canvas.width;
   const h = canvas.height;
   ctx.clearRect(0, 0, w, h);
 
-  const originX = w / 2;
-  const originY = h - 48;
-  const radius = Math.min(w, h) * 0.42;
+  const maxDeg = Math.max(targetDeg * 1.6, 40);
+  const originY = h / 2;
+  const scaleY = (h / 2 - 24) / maxDeg;
+  const t0 = nowMs - windowMs;
+  const mapX = (t) => ((t - t0) / windowMs) * w;
+  const mapY = (rate) => originY - rate * scaleY;
 
-  ctx.save();
-  ctx.translate(originX, originY);
-
-  // Background gauge circle.
-  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.arc(0, 0, radius, 0, TAU);
-  ctx.stroke();
-
-  // Ideal-angle target zone (both signs, since a strafe cycle alternates
-  // direction) with a small tolerance band.
-  if (view.idealAngle != null) {
-    const tol = view.toleranceRad ?? (Math.PI / 180) * 2;
-    ctx.fillStyle = 'rgba(80,220,120,0.18)';
-    for (const sign of [1, -1]) {
-      const a = sign * view.idealAngle;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.arc(0, 0, radius, a - tol - Math.PI / 2, a + tol - Math.PI / 2);
-      ctx.closePath();
-      ctx.fill();
-    }
-    for (const sign of [1, -1]) {
-      const p = polar(sign * view.idealAngle, radius);
-      ctx.strokeStyle = 'rgba(80,220,120,0.9)';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 4]);
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(p.x, p.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
+  // Stutter bands (drawn first, behind everything).
+  ctx.fillStyle = 'rgba(255, 70, 70, 0.14)';
+  for (const ev of stutterEvents) {
+    const x0 = Math.max(0, mapX(ev.start));
+    const x1 = Math.min(w, mapX(ev.end));
+    if (x1 > x0) ctx.fillRect(x0, 0, x1 - x0, h);
   }
 
-  // Velocity direction reference (always straight up).
-  ctx.strokeStyle = '#4da3ff';
-  ctx.lineWidth = 3;
+  // Zero line.
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(0, -radius);
+  ctx.moveTo(0, originY);
+  ctx.lineTo(w, originY);
   ctx.stroke();
 
-  // Current aim direction (live).
-  if (view.aimAngle != null) {
-    const onTarget = view.idealAngle != null &&
-      Math.abs(Math.abs(view.aimAngle) - view.idealAngle) <= (view.toleranceRad ?? (Math.PI / 180) * 2);
-    const p = polar(view.aimAngle, radius);
-    ctx.strokeStyle = onTarget ? '#5be178' : '#ff5b5b';
-    ctx.lineWidth = 3;
+  // Target reference lines (+/- target, since direction alternates).
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.setLineDash([5, 5]);
+  for (const sign of [1, -1]) {
+    const y = mapY(sign * targetDeg);
     ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(p.x, p.y);
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
     ctx.stroke();
-    ctx.fillStyle = ctx.strokeStyle;
+  }
+  ctx.setLineDash([]);
+
+  // The trace itself, segment-colored by instantaneous error vs target.
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = 'round';
+  for (let i = 1; i < samples.length; i++) {
+    const a = samples[i - 1];
+    const b = samples[i];
+    const errA = Math.min(1, Math.abs(Math.abs(a.rateDeg) - targetDeg) / Math.max(targetDeg, 1e-6));
+    const errB = Math.min(1, Math.abs(Math.abs(b.rateDeg) - targetDeg) / Math.max(targetDeg, 1e-6));
+    ctx.strokeStyle = errorColor((errA + errB) / 2);
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 5, 0, TAU);
+    ctx.moveTo(mapX(a.t), mapY(a.rateDeg));
+    ctx.lineTo(mapX(b.t), mapY(b.rateDeg));
+    ctx.stroke();
+  }
+
+  // Leading dot at the current sample.
+  if (samples.length) {
+    const last = samples[samples.length - 1];
+    const err = Math.min(1, Math.abs(Math.abs(last.rateDeg) - targetDeg) / Math.max(targetDeg, 1e-6));
+    ctx.fillStyle = errorColor(err);
+    ctx.beginPath();
+    ctx.arc(mapX(last.t), mapY(last.rateDeg), 4, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  ctx.restore();
-
-  // HUD text.
-  ctx.fillStyle = '#e8e8e8';
-  ctx.font = '13px monospace';
+  // Minimal HUD, top-left.
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.font = '12px "SF Mono", "Cascadia Code", monospace';
   ctx.textBaseline = 'top';
+  const liveRate = samples.length ? Math.abs(samples[samples.length - 1].rateDeg) : 0;
   const lines = [
-    `speed: ${view.speed?.toFixed(1) ?? '-'} u/s`,
-    `aim vs velocity (A): ${view.aimAngle != null ? deg(view.aimAngle).toFixed(2) + ' deg' : '-'}`,
-    `ideal angle: ${view.idealAngle != null ? '+/-' + deg(view.idealAngle).toFixed(2) + ' deg' : '-'}`,
-    `angular error: ${view.angleErrorDeg != null ? view.angleErrorDeg.toFixed(2) + ' deg' : '-'}`,
-    `tick efficiency: ${view.efficiencyPct != null ? view.efficiencyPct.toFixed(1) + '%' : '-'}`,
-    `avg efficiency: ${view.avgEfficiencyPct != null ? view.avgEfficiencyPct.toFixed(1) + '%' : '-'}`,
+    `speed  ${stats.speed?.toFixed(0) ?? '-'} u/s`,
+    `target ${targetDeg.toFixed(0)} deg/s   actual ${liveRate.toFixed(0)} deg/s`,
+    `consistency ${stats.scorePct?.toFixed(0) ?? '0'}%   streak ${(stats.streakMs / 1000).toFixed(1)}s`,
   ];
-  lines.forEach((line, i) => ctx.fillText(line, 10, 10 + i * 18));
+  lines.forEach((line, i) => ctx.fillText(line, 12, 10 + i * 16));
 }
