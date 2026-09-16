@@ -1,18 +1,55 @@
 // Scrolling per-tick sync bars: oldest on the left, most recent on the
-// right, bar height = that tick's speed-gain efficiency (smoothed over a
-// short trailing window -- see synctrace.js for why) vs the theoretical
-// max for the speed you were at, color green (efficient) to red
-// (inefficient/no gain). This is the standard bhop/surf "sync" HUD, mapped
-// directly onto the physics engine's own accel/efficiency numbers.
+// right. Bar height is that tick's speed-gain ratio (smoothed over a short
+// trailing window -- see synctrace.js) relative to a horizontal "optimal"
+// reference line at 100%: bars reaching it are ideal, taller means
+// over-rotating past it, shorter means under-turning, and bars dropping
+// below the zero baseline mean actively losing speed that tick. Color
+// tiers and the unclamped ratio (rather than floored at 0%) are ported
+// from Momentum Mod's own strafe-trainer HUD (its speedGain/idealGain
+// ratio, unclamped, with the same blue/cyan/green/yellow/gray/orange/red
+// tiering) -- see conversation history for the source file.
 function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-function efficiencyColor(pct) {
-  const t = Math.max(0, Math.min(1, pct / 100));
-  const hue = lerp(0, 140, t); // red -> green
-  return `hsl(${hue}, 85%, 52%)`;
+function lerpRgb(a, b, t) {
+  return [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
 }
+
+// Ratio breakpoints (in %, 100 = optimal) -> base RGB, ported from the
+// reference HUD's EXTRA/PERFECT/GOOD/SLOW/NEUTRAL/LOSS/STOP tiers.
+const COLOR_STOPS = [
+  { r: -100, c: [211, 24, 24] }, // STOP -- fully reversing/stalling
+  { r: -20, c: [220, 116, 13] }, // LOSS -- actively losing speed
+  { r: 0, c: [178, 178, 178] }, // NEUTRAL -- no gain, no loss
+  { r: 50, c: [178, 178, 178] },
+  { r: 85, c: [248, 222, 74] }, // SLOW
+  { r: 95, c: [21, 152, 86] }, // GOOD
+  { r: 100, c: [87, 200, 255] }, // PERFECT
+  { r: 105, c: [24, 150, 211] }, // EXTRA -- over-rotating past optimal
+];
+
+function tierColor(ratio) {
+  if (ratio <= COLOR_STOPS[0].r) return `rgb(${COLOR_STOPS[0].c.map(Math.round).join(',')})`;
+  const last = COLOR_STOPS[COLOR_STOPS.length - 1];
+  if (ratio >= last.r) return `rgb(${last.c.map(Math.round).join(',')})`;
+  for (let i = 0; i < COLOR_STOPS.length - 1; i++) {
+    const a = COLOR_STOPS[i];
+    const b = COLOR_STOPS[i + 1];
+    if (ratio >= a.r && ratio <= b.r) {
+      const t = b.r === a.r ? 0 : (ratio - a.r) / (b.r - a.r);
+      const [r, g, bl] = lerpRgb(a.c, b.c, t);
+      return `rgb(${Math.round(r)},${Math.round(g)},${Math.round(bl)})`;
+    }
+  }
+  return `rgb(${COLOR_STOPS[COLOR_STOPS.length - 1].c.join(',')})`;
+}
+
+// Display range clamp -- an extreme single-tick spike shouldn't blow the
+// scale out for everything else on screen; color still reflects the true
+// unclamped value even when the bar's height is capped.
+const DISPLAY_MIN = -60;
+const DISPLAY_MAX = 180;
 
 export function renderSyncBars(ctx, { ticks, maxTicks, speed, syncPct, avgEfficiencyPct, lastTickYawDeg }) {
   const { canvas } = ctx;
@@ -20,28 +57,41 @@ export function renderSyncBars(ctx, { ticks, maxTicks, speed, syncPct, avgEffici
   const h = canvas.height;
   ctx.clearRect(0, 0, w, h);
 
-  const baseline = h - 40;
-  const maxBarHeight = baseline - 40;
+  const chartTop = 20;
+  const chartBottom = h - 60;
+  const zeroY = chartBottom; // 0% (no gain) baseline
+  const optimalY = chartBottom - 0.62 * (chartBottom - chartTop); // 100% reference line
+  const pxPerPct = (zeroY - optimalY) / 100;
   const barWidth = w / maxTicks;
   const startIndex = maxTicks - ticks.length;
 
-  // Baseline.
+  const yFor = (pct) => zeroY - Math.max(DISPLAY_MIN, Math.min(DISPLAY_MAX, pct)) * pxPerPct;
+
+  // Zero baseline.
   ctx.strokeStyle = 'rgba(255,255,255,0.15)';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(0, baseline);
-  ctx.lineTo(w, baseline);
+  ctx.moveTo(0, zeroY);
+  ctx.lineTo(w, zeroY);
   ctx.stroke();
+
+  // Optimal (100%) reference line.
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.setLineDash([5, 5]);
+  ctx.beginPath();
+  ctx.moveTo(0, optimalY);
+  ctx.lineTo(w, optimalY);
+  ctx.stroke();
+  ctx.setLineDash([]);
 
   ticks.forEach((tick, i) => {
     const x = (startIndex + i) * barWidth;
-    // Smoothed value drives both height and color -- no hard gained/
-    // not-gained branch, so a single tremor-driven blip dents a bar rather
-    // than flipping it instantly between full-green and flat-red.
-    const pct = Math.max(0, Math.min(100, tick.smoothedEfficiencyPct));
-    const barH = Math.max(3, (pct / 100) * maxBarHeight);
-    ctx.fillStyle = efficiencyColor(pct);
-    ctx.fillRect(x, baseline - barH, Math.max(1, barWidth - 1), barH);
+    const pct = tick.smoothedEfficiencyPct;
+    const y = yFor(pct);
+    const top = Math.min(y, zeroY);
+    const barH = Math.max(2, Math.abs(zeroY - y));
+    ctx.fillStyle = tierColor(pct);
+    ctx.fillRect(x, top, Math.max(1, barWidth - 1), barH);
   });
 
   // HUD top-right / bottom-right -- settings live top-left now, so the
@@ -49,7 +99,7 @@ export function renderSyncBars(ctx, { ticks, maxTicks, speed, syncPct, avgEffici
   // instead of settings competing with where you're actually looking.
   ctx.textAlign = 'right';
   ctx.textBaseline = 'top';
-  ctx.fillStyle = efficiencyColor(syncPct);
+  ctx.fillStyle = tierColor(syncPct);
   ctx.font = '600 32px -apple-system, "Segoe UI", sans-serif';
   ctx.fillText(`${syncPct.toFixed(0)}%`, w - 16, 14);
 
@@ -60,7 +110,7 @@ export function renderSyncBars(ctx, { ticks, maxTicks, speed, syncPct, avgEffici
   ctx.textBaseline = 'bottom';
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.font = '12px "SF Mono", "Cascadia Code", monospace';
-  ctx.fillText(`avg efficiency  ${avgEfficiencyPct.toFixed(0)}%`, w - 16, h - 36);
+  ctx.fillText(`avg gain ratio  ${avgEfficiencyPct.toFixed(0)}%`, w - 16, h - 36);
   ctx.fillText(`speed  ${speed.toFixed(0)} u/s`, w - 16, h - 20);
   // Diagnostic: raw turn the last tick actually registered. Move the mouse
   // slowly and watch this -- if it stays at a flat 0.00 while you can feel

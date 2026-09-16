@@ -179,7 +179,13 @@ function onTick(dt, yawDelta) {
   );
   const maxGain = best.speed - startSpeed;
   const actualGain = result.speed - startSpeed;
-  const efficiencyPct = maxGain > 1e-9 ? Math.max(0, (actualGain / maxGain) * 100) : actualGain >= 0 ? 100 : 0;
+  // Unclamped, matching Momentum Mod's own strafe-trainer HUD (speedGain /
+  // idealGain, shown as-is): negative means you actively lost speed this
+  // tick, >100% means you gained more than the single-tick reference (can
+  // happen in the accel-capped regime). Clamping this to [0, 100] was
+  // throwing away exactly the information that tells losing speed apart
+  // from merely not gaining it.
+  const efficiencyPct = maxGain > 1e-9 ? (actualGain / maxGain) * 100 : actualGain >= 0 ? 100 : -100;
 
   trace.push({ efficiencyPct, gained: result.accel > 0 });
 }

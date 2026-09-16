@@ -14,14 +14,16 @@ python3 -m http.server 8000
 
 Click the canvas to lock the pointer, then move the mouse to strafe.
 
-The trainer's core visual is a scrolling "sync" bar chart -- the standard
-bhop/surf HUD metric, one bar per game tick. Each bar's height is that
-tick's speed-gain efficiency versus the theoretical max for your speed
-(green = efficient, red/short = little or no gain), smoothed over a short
-trailing window (see "Why the bars are smoothed" below), and the headline
-SYNC% is the percentage of recent ticks that gained any speed at all,
-unsmoothed. Since keyboardless strafing has no key press defining a wish
-direction, a dip in this signal *is* the hesitation-at-a-direction-reversal
+The trainer's core visual is a scrolling bar chart -- one bar per game
+tick, height and color driven by that tick's speed-gain ratio (actual gain
+/ theoretical max for your speed, ported from Momentum Mod's own
+strafe-trainer HUD -- see "Ported from Momentum Mod" below), smoothed over
+a short trailing window (see "Why the bars are smoothed" below). A dashed
+line marks 100% (optimal); bars above it mean over-rotating past optimal,
+below the zero baseline means actively losing speed that tick. The
+headline SYNC% is the percentage of recent ticks that gained any speed at
+all, unsmoothed. Since keyboardless strafing has no key press defining a
+wish direction, a dip in this signal *is* the hesitation-at-a-direction-reversal
 problem -- no separate smoothness heuristic needed on top of it. Settings (tickrate,
 sv_airaccelerate, sensitivity, m_yaw, air-accel penalties) are behind the
 gear icon, top left; tickrate has quick-select buttons for 64/66.667/100/128,
@@ -52,6 +54,27 @@ just the real underlying transitions (`SyncTrace`'s `smoothingWindow` in
 unsmoothed values -- they're already aggregates over many ticks, so
 smoothing first wouldn't change them, and raw is the more honest number
 there.
+
+**Ported from Momentum Mod:** the user found Momentum Mod's actual
+Panorama UI source (`RoadyBhop/panorama`) and asked whether we could build
+on it directly. Its Panorama TypeScript/XML/SCSS runs inside the actual
+game engine via APIs (`MomentumMovementAPI`, `MomentumPlayerAPI`, ...)
+that only exist when Momentum Mod itself is running, so none of it
+executes in a browser -- using it "as a basis" would mean owning and
+installing that specific game and dropping files into its UI folder, not
+opening a page. But two things from its `scripts/hud/strafe-trainer.ts`
+were worth porting as design/formula, not code: (1) its core metric is
+`speedGain / idealGain`, validating this trainer's `efficiencyPct`
+independently; (2) critically, it does *not* clamp that ratio to
+[0, 100] -- it shows negative when you're actively losing speed and >100%
+when over-rotating, with a 7-tier color scale (blue/cyan/green/yellow/
+gray/orange/red) instead of a flat two-color gradient. This trainer had
+been discarding exactly that information by flooring at 0%; both are
+adopted now (`render.js`'s `tierColor`/`COLOR_STOPS`, ported from that
+file's `Colors` object and `getColorPair`). Its other file,
+`strafe-sync.ts` ("Strafe Offset"), measures key-press-vs-mouse-turn
+timing in ticks -- inherently needs an A/D key event to compare against,
+so it doesn't apply to keyboardless training at all.
 
 ## How it works
 
