@@ -159,6 +159,43 @@ velocity angle == 90 degrees); a realistic back-and-forth strafe (direction
 reversing every few ticks, as a real strafer alternates keys) still nets a
 speed gain across many reversals, not just in the single-direction case.
 
+**Why the bars are a yaw-rate ratio now, not a gain ratio (round 4):**
+reported directly that the panel still showed non-KSF values after the
+default change, and that bars never crossed the 100% line "even when
+strafing very fast," which contradicted the uploaded Momentum Mod
+Panorama zip. Two separate causes:
+
+1. The settings panel had no way back to "the actual defaults" once
+   customized -- `localStorage` persists whatever you last set forever,
+   and Reset only restarted the current run, never touched settings. Added
+   a distinct "Restore defaults" button (`resetSettingsToDefaults` in
+   `main.js`) that reads each control's `defaultValue`/`defaultChecked`
+   (the original HTML attributes, never overwritten by runtime `.value`
+   assignment) so it always matches whatever index.html currently declares
+   as default -- KSF values included -- rather than a hardcoded snapshot
+   that could itself drift out of date.
+2. The gain-ratio metric (`actualGain / idealGain`, see round 3 above) is
+   mathematically incapable of exceeding 100%, by construction: `idealGain`
+   was already defined as the best possible gain from *any* angle this
+   tick, so nothing could ever beat it, no matter how fast you turned.
+   Fetched the actual momentum-mod design directly
+   ([momentum-mod/game#1629](https://github.com/momentum-mod/game/issues/1629))
+   to check against a real reference rather than memory: its "gain
+   percentage" is literally `ViewAngle delta / Optimal rotation angle` --
+   a ratio of two *rotation amounts*, not two *speeds* -- explicitly not
+   clamped to 100. Replaced the metric with exactly that shape, using this
+   codebase's own already-validated `idealYawSpeedFor` for the "optimal"
+   side: `efficiencyPct = |yawDelta| / (idealYawSpeedFor(...) * tickInterval) * 100`.
+   This also matches the user's own description of the skill almost word
+   for word ("the only thing impacting gain is how fast you move your
+   mouse relative to the optimal, given the tickrate and speed
+   travelling") far more directly than a speed-gain ratio does, and is
+   simpler: no more hypothetical "best possible tick" simulation needed to
+   compute a denominator. Verified directly in-browser: sustained
+   over-turning now produces bars well past the reference line (into the
+   ported EXTRA/blue tier), matching the reference implementation's own
+   unclamped behavior.
+
 ## How it works
 
 - `src/physics.mjs` -- pure port of the Source engine's `AirAccelerate`

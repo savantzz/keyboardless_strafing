@@ -174,7 +174,8 @@ canvas#trace {
   border-color: #444;
 }
 
-button#resetBtn {
+button#resetBtn,
+button#restoreDefaultsBtn {
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--border);
@@ -187,7 +188,8 @@ button#resetBtn {
   transition: color 0.15s, border-color 0.15s;
 }
 
-button#resetBtn:hover {
+button#resetBtn:hover,
+button#restoreDefaultsBtn:hover {
   color: var(--text);
   border-color: #333;
 }

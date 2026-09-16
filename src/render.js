@@ -1,15 +1,15 @@
 // Scrolling per-tick sync bars: oldest on the left, most recent on the
 // right. Bar height is that tick's quality score (smoothed over a short
-// trailing window -- see synctrace.js): actualGain/idealGain when gaining
-// speed (0% = no gain, 100% = the best this tick could do), or
-// actualGain/accelCap when actively losing speed -- see main.js's onTick
-// for the full reasoning and what this replaced. A horizontal "optimal"
-// reference line marks 100%: bars reaching it are ideal, taller means
-// over-rotating past it, shorter means under-turning, and bars dropping
-// below the zero baseline mean actively losing speed that tick. The
-// unclamped range and color tiers (rather than floored at 0%, flat
-// red-green) are ported from Momentum Mod's own strafe-trainer HUD -- see
-// conversation history for the source file.
+// trailing window -- see synctrace.js): actual mouse turn this tick versus
+// the ideal turn amount for your current speed/settings, as a percentage
+// (idealYawSpeedFor in physics.mjs) -- see main.js's onTick for the full
+// reasoning and what this replaced. A horizontal "optimal" reference line
+// marks 100%: bars reaching it turned exactly the ideal amount, taller
+// means over-turning past it, shorter means under-turning. Unbounded
+// above (confirmed directly from momentum-mod/game issue #1629: its own
+// "gain percentage" is explicitly not clamped to 100 either) -- the
+// unclamped range and color tiers are ported from Momentum Mod's own
+// strafe-trainer HUD design, see conversation history for the source.
 function lerp(a, b, t) {
   return a + (b - a) * t;
 }

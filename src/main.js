@@ -2,8 +2,9 @@ import {
   DEFAULT_PARAMS,
   accelCap,
   applyAirAccelTick,
-  idealAngle,
+  idealYawSpeedFor,
   keyboardlessWishDir,
+  tickInterval,
   vecLength,
 } from './physics.mjs';
 import { MouseInput } from './input.js';
@@ -167,41 +168,24 @@ const trace = new SyncTrace({ maxTicks: 240 });
 let lastTickYawDeg = 0;
 
 // Physics ticks: authoritative velocity simulation. Sync is scored per
-// tick (one bar = one tick) as a piecewise quality score:
-//   - gaining (actualGain >= 0): actualGain / idealGain (the standard
-//     speedGain/idealGain ratio, matching Momentum Mod's own
-//     strafe-trainer HUD), so 0% = no gain, 100% = the best this tick
-//     could do.
-//   - losing (actualGain < 0): actualGain / accelCap instead. accelCap is
-//     fixed by settings (never shrinks with speed), which is the point --
-//     see below.
-//
-// This replaced two earlier, each-broken-in-a-different-way attempts:
-// 1. A straight (possibly negative) speedGain/idealGain ratio everywhere:
-//    idealGain shrinks roughly as 1/speed, so a fixed, tiny real-world
-//    aiming error (0.5deg) swung from ~99% at 260 u/s to -35% at 4000 u/s
-//    for the exact same absolute precision.
-// 2. A min-max normalization between v_new^2 at the ideal angle and
-//    v_new^2 aiming 180deg opposite: this fixed (1), but made "resting"
-//    (accel = 0, i.e. literally zero gain) score ~99.6% instead of 0%,
-//    because "aim 180deg backward" is a far more extreme worst-case than
-//    "do nothing," which compressed the whole useful range near the top.
-//    Reported directly: the HUD defaulted to looking great while idle.
-//
-// This piecewise version keeps (1)'s proven-correct gaining-side ratio
-// (same as the validated reference implementation) while fixing (2)'s
-// resting bug exactly: accelGain = 0 now gives exactly 0%, not a value
-// anchored to an unrelated extreme. The losing side no longer depends on
-// idealGain at all, so it can't inherit that ratio's high-speed
-// volatility. The gaining side's high-speed sensitivity near the exact
-// optimum is a known remaining tradeoff -- every formulation tried so far
-// either has that property or breaks somewhere else (see conversation
-// history) -- flagged for future revisit if it proves to matter in
-// practice.
+// tick (one bar = one tick) as a yaw-RATE ratio: how much you actually
+// turned the mouse this tick versus the ideal turn amount for your
+// current speed/tickrate/settings (idealYawSpeedFor in physics.mjs) --
+// 100% = exactly optimal, under 100% = under-turning, over 100% =
+// over-turning past optimal, unbounded above. Matches the momentum-mod
+// strafe trainer's actual design, confirmed directly from
+// github.com/momentum-mod/game issue #1629: "gain percentage" there is
+// literally ViewAngle delta / Optimal rotation angle, explicitly not
+// clamped to 100. See README for why this replaced an earlier
+// actualGain/idealGain speed-gain ratio: that idealGain was already the
+// analytically-best possible gain from ANY angle this tick, so
+// actualGain could never exceed it -- structurally bounded at <=100% no
+// matter how fast you turned, which is why bars never crossed the
+// reference line even when strafing very fast. A yaw-rate ratio has no
+// such ceiling, since it's just two rotation amounts divided.
 function onTick(dt, yawDelta) {
   const params = readParams();
   const startSpeed = vecLength(state.velocity);
-  const startAngle = Math.atan2(state.velocity.y, state.velocity.x);
 
   lastTickYawDeg = (yawDelta * 180) / Math.PI;
   state.worldViewAngle += yawDelta;
@@ -219,18 +203,9 @@ function onTick(dt, yawDelta) {
   state.velocity = result.velocity;
 
   const cap = accelCap(params);
-  const idealA = idealAngle(startSpeed, params.airMaxSpeed, cap);
-  const startVel = { x: startSpeed * Math.cos(startAngle), y: startSpeed * Math.sin(startAngle) };
-  const best = applyAirAccelTick(startVel, startAngle + idealA, params);
-
-  const idealGain = best.speed - startSpeed;
-  const actualGain = result.speed - startSpeed;
-  let efficiencyPct;
-  if (actualGain >= 0) {
-    efficiencyPct = idealGain > 1e-9 ? (actualGain / idealGain) * 100 : 100;
-  } else {
-    efficiencyPct = (actualGain / cap) * 100;
-  }
+  const idealYawDelta = idealYawSpeedFor(startSpeed, params.airMaxSpeed, cap, params.tickRate) * tickInterval(params.tickRate);
+  const actualYawDelta = Math.abs(yawDelta);
+  const efficiencyPct = idealYawDelta > 1e-9 ? (actualYawDelta / idealYawDelta) * 100 : 0;
 
   trace.push({ efficiencyPct, gained: result.accel > 0 });
 }
@@ -256,7 +231,7 @@ const sim = new Simulation({ tickRate: Number(controls.tickRate.value), onTick, 
 // current velocity vector to the new magnitude, keeping its direction) --
 // not just "what to reset to." Otherwise dragging this mid-session visibly
 // does nothing, since the sim only reads it once at load/reset.
-linkPair(controls.initialVelocity, el('initialVelocityNum'), (v) => {
+const applyInitialVelocity = linkPair(controls.initialVelocity, el('initialVelocityNum'), (v) => {
   const speed = vecLength(state.velocity);
   const angle = Math.atan2(state.velocity.y, state.velocity.x);
   if (speed > 1e-6) {
@@ -266,10 +241,10 @@ linkPair(controls.initialVelocity, el('initialVelocityNum'), (v) => {
   }
 });
 const applyTickRate = linkPair(controls.tickRate, el('tickRateNum'), (v) => sim.setTickRate(v));
-linkPair(controls.airAccelerate, el('airAccelerateNum'));
-linkPair(controls.groundMaxSpeed, el('groundMaxSpeedNum'));
-linkPair(controls.sensitivity, el('sensitivityNum'), (v) => (input.sensitivity = v));
-linkPair(controls.mYaw, el('mYawNum'), (v) => (input.mYaw = v));
+const applyAirAccelerate = linkPair(controls.airAccelerate, el('airAccelerateNum'));
+const applyGroundMaxSpeed = linkPair(controls.groundMaxSpeed, el('groundMaxSpeedNum'));
+const applySensitivity = linkPair(controls.sensitivity, el('sensitivityNum'), (v) => (input.sensitivity = v));
+const applyMYaw = linkPair(controls.mYaw, el('mYawNum'), (v) => (input.mYaw = v));
 
 for (const btn of document.querySelectorAll('#tickRatePresets button')) {
   btn.addEventListener('click', () => applyTickRate(btn.dataset.value));
@@ -280,6 +255,32 @@ for (const id of CHECKBOX_IDS) {
 }
 
 el('resetBtn').addEventListener('click', resetState);
+
+// Separate from resetState (which restarts the current run): this restores
+// the settings panel itself to index.html's declared defaults. Reported
+// directly -- after the sv_maxspeed/sv_airaccelerate defaults were updated
+// to match KSF convention, the panel kept showing old, heavily-customized
+// values (100 / 400 / sensitivity 10) with no visible connection to
+// anything current, because localStorage persists whatever you last set
+// indefinitely and there was previously no way back to "the actual
+// defaults" short of manually retyping every field or clearing site data.
+// `defaultValue`/`defaultChecked` read the original HTML `value`/`checked`
+// attributes, which JS assigning `.value` at runtime never overwrites, so
+// this always restores exactly what index.html declares -- current KSF
+// defaults included -- not a hardcoded snapshot that could itself go stale.
+function resetSettingsToDefaults() {
+  applyInitialVelocity(controls.initialVelocity.defaultValue);
+  applyTickRate(controls.tickRate.defaultValue);
+  applyAirAccelerate(controls.airAccelerate.defaultValue);
+  applyGroundMaxSpeed(controls.groundMaxSpeed.defaultValue);
+  applySensitivity(controls.sensitivity.defaultValue);
+  applyMYaw(controls.mYaw.defaultValue);
+  for (const id of CHECKBOX_IDS) {
+    controls[id].checked = controls[id].defaultChecked;
+  }
+  saveSettings();
+}
+el('restoreDefaultsBtn').addEventListener('click', resetSettingsToDefaults);
 
 const settingsToggle = el('settingsToggle');
 const settingsPanel = el('panel');
