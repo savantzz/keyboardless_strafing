@@ -23,8 +23,18 @@ keyboardless strafing has no key press defining a wish direction, a dip in
 this signal *is* the hesitation-at-a-direction-reversal problem -- no
 separate smoothness heuristic needed on top of it. Settings (tickrate,
 sv_airaccelerate, sensitivity, m_yaw, air-accel penalties) are behind the
-gear icon, top right; tickrate has quick-select buttons for 64/66.667/100/128,
-and every slider has a paired number input for typing an exact value.
+gear icon, top left; tickrate has quick-select buttons for 64/66.667/100/128,
+every slider has a paired number input for typing an exact value, and all
+of it is remembered in the browser (`localStorage`) across sessions.
+
+**Why the default speed is 260, not something higher:** the angular window
+where a strafe actually gains speed shrinks as your speed rises --
+`gainRange()` in `physics.mjs` gives its exact width, e.g. ~13 degrees at
+260 u/s but only ~2 degrees at 1600 u/s. At high speed, even fast, precise
+mouse control will land inside that window for only a couple of ticks per
+sweep, which reads as sparse, "chunky" bars -- that's the physics being
+accurately unforgiving, not a rendering bug. 260 keeps the window wide
+enough to be learnable.
 
 ## How it works
 

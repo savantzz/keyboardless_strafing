@@ -13,10 +13,13 @@ import { SyncTrace } from './synctrace.js';
 const canvas = document.getElementById('trace');
 const ctx = canvas.getContext('2d');
 
+// Size directly off the viewport rather than the parent's bounding rect --
+// on some layouts the latter can momentarily read wider than the actual
+// window (e.g. before a fixed-position sibling settles), which made the
+// canvas wider than the page and forced a horizontal scrollbar.
 function resizeCanvas() {
-  const rect = canvas.parentElement.getBoundingClientRect();
-  canvas.width = rect.width;
-  canvas.height = rect.height;
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
@@ -36,19 +39,62 @@ const controls = {
   penaltyMoveup: el('penaltyMoveup'),
 };
 
+// Remember settings across sessions (per-browser, this-device-only --
+// there's no account/server, so it can't follow you to another machine).
+// Applied before anything reads controls.value below, so a saved value
+// wins over the HTML default from the very first frame.
+const STORAGE_KEY = 'strafe-trainer-settings-v1';
+const RANGE_IDS = ['initialVelocity', 'tickRate', 'airAccelerate', 'groundMaxSpeed', 'sensitivity', 'mYaw'];
+const CHECKBOX_IDS = ['penaltyCrouch', 'penaltyWalk', 'penaltyZ', 'penaltyMoveup'];
+const numEl = (id) => el(id + 'Num');
+
+function loadSavedSettings() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null; // private browsing / storage blocked -- just use the HTML defaults
+  }
+}
+
+function saveSettings() {
+  try {
+    const data = {};
+    for (const id of RANGE_IDS) data[id] = controls[id].value;
+    for (const id of CHECKBOX_IDS) data[id] = controls[id].checked;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch {
+    // ignore -- persistence is a nicety, not required for the app to work
+  }
+}
+
+const saved = loadSavedSettings();
+if (saved) {
+  for (const id of RANGE_IDS) {
+    if (saved[id] === undefined) continue;
+    controls[id].value = saved[id];
+    numEl(id).value = saved[id];
+  }
+  for (const id of CHECKBOX_IDS) {
+    if (saved[id] === undefined) continue;
+    controls[id].checked = saved[id];
+  }
+}
+
 // Every slider gets a matching number input the user can type an exact
 // value into (dragging a thin slider for something like sensitivity is too
 // imprecise) -- bind them together so either one updates both.
-function linkPair(rangeEl, numEl, onChange) {
+function linkPair(rangeEl, numberEl, onChange) {
   const apply = (value) => {
     rangeEl.value = value;
-    numEl.value = value;
+    numberEl.value = value;
     if (onChange) onChange(Number(value));
+    saveSettings();
   };
   rangeEl.addEventListener('input', () => apply(rangeEl.value));
-  numEl.addEventListener('change', () => apply(numEl.value));
-  numEl.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') apply(numEl.value);
+  numberEl.addEventListener('change', () => apply(numberEl.value));
+  numberEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') apply(numberEl.value);
   });
   return apply;
 }
@@ -154,6 +200,10 @@ linkPair(controls.mYaw, el('mYawNum'), (v) => (input.mYaw = v));
 
 for (const btn of document.querySelectorAll('#tickRatePresets button')) {
   btn.addEventListener('click', () => applyTickRate(btn.dataset.value));
+}
+
+for (const id of CHECKBOX_IDS) {
+  controls[id].addEventListener('change', saveSettings);
 }
 
 el('resetBtn').addEventListener('click', resetState);

@@ -48,7 +48,7 @@ canvas#trace {
 #settingsToggle {
   position: fixed;
   top: 14px;
-  right: 16px;
+  left: 16px;
   z-index: 20;
   width: 34px;
   height: 34px;
@@ -69,16 +69,17 @@ canvas#trace {
 #panel {
   position: fixed;
   top: 0;
-  right: 0;
+  left: 0;
   height: 100%;
-  width: 300px;
+  width: 320px;
   background: var(--panel);
-  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
   padding: 56px 18px 18px;
-  transform: translateX(100%);
+  transform: translateX(-100%);
   transition: transform 0.2s ease;
   z-index: 10;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 #panel.open {
@@ -99,6 +100,11 @@ canvas#trace {
   border-top: 1px solid var(--border);
   margin: 0 0 14px;
   padding: 12px 0 0;
+  /* Fieldsets ignore their parent's width by default in most browsers
+     (a long-standing quirk -- their intrinsic min-width is min-content,
+     not 0), which was silently pushing every row ~40px past the panel
+     edge. */
+  min-width: 0;
 }
 
 #panel legend {
@@ -119,12 +125,13 @@ canvas#trace {
   font-size: 12px;
 }
 
-.field label { color: #aaa; flex: 1; }
-.field input[type="range"] { flex: 2; accent-color: var(--accent); }
+.field label { color: #aaa; flex: 1 1 auto; min-width: 0; overflow-wrap: break-word; }
+.field input[type="range"] { flex: 1 1 auto; min-width: 30px; accent-color: var(--accent); }
 .field input[type="checkbox"] { accent-color: var(--accent); }
 
 .field input.num {
-  width: 60px;
+  flex: 0 0 68px; /* fixed -- never let the number box be the thing that shrinks */
+  width: 68px;
   background: #111;
   color: var(--text);
   border: 1px solid var(--border);
