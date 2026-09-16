@@ -216,3 +216,24 @@ export function idealWallAngle(speed, airMaxSpeed, cap) {
   }
   return capBoundaryAngle(speed, airMaxSpeed, cap);
 }
+
+// --- Keyboardless-strafing input model ---
+//
+// Classic air-strafing holds a directional key (A/D); that key's state is
+// what actually supplies the wish direction as view-angle +/- 90 degrees
+// -- your view/crosshair itself tracks close to your direction of travel
+// while strafing well, it is NOT the wish direction. "Keyboardless"
+// automates the key press (e.g. a script that holds whichever key matches
+// the direction you're currently turning) rather than eliminating that
+// offset, so a mouse-only trainer has to reproduce the same offset: wish
+// direction is view angle +/- 90 degrees, sign following whichever way
+// you're turning this tick, not the view angle directly. No turning this
+// tick (yawDelta === 0) means no key is being held, i.e. no wish
+// direction at all, matching the real engine (wishspeed 0 fails
+// AirAccelerate's addspeed check and it returns without touching
+// velocity) -- callers should apply no acceleration for that tick rather
+// than calling applyAirAccelTick with an arbitrary direction.
+export function keyboardlessWishDir(worldViewAngle, yawDelta) {
+  const sign = Math.sign(yawDelta);
+  return { active: sign !== 0, wishDirRad: worldViewAngle + sign * (Math.PI / 2) };
+}

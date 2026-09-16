@@ -3,6 +3,7 @@ import {
   accelCap,
   applyAirAccelTick,
   idealAngle,
+  keyboardlessWishDir,
   vecLength,
 } from './physics.mjs';
 import { MouseInput } from './input.js';
@@ -204,7 +205,17 @@ function onTick(dt, yawDelta) {
 
   lastTickYawDeg = (yawDelta * 180) / Math.PI;
   state.worldViewAngle += yawDelta;
-  const result = applyAirAccelTick(state.velocity, state.worldViewAngle, params);
+
+  // See keyboardlessWishDir in physics.mjs for why this isn't just
+  // applyAirAccelTick(state.velocity, state.worldViewAngle, params) --
+  // confirmed directly that view/crosshair tracks close to travel
+  // direction while strafing well, which means view angle itself is not
+  // the wish direction; it's offset +/-90 degrees by whichever key an
+  // auto-strafe setup is currently holding.
+  const { active, wishDirRad } = keyboardlessWishDir(state.worldViewAngle, yawDelta);
+  const result = active
+    ? applyAirAccelTick(state.velocity, wishDirRad, params)
+    : { velocity: state.velocity, speed: startSpeed, accel: 0 };
   state.velocity = result.velocity;
 
   const cap = accelCap(params);

@@ -112,6 +112,39 @@ ported from that file's `Colors` object and `getColorPair`). Its other file,
 timing in ticks -- inherently needs an A/D key event to compare against,
 so it doesn't apply to keyboardless training at all.
 
+**Why mouse angle isn't the wish direction (the actual "something
+fundamental" bug):** asked directly, after every earlier fix, why it still
+felt completely wrong given thousands of hours of real strafing experience.
+Asked back a single concrete, checkable question -- while strafing well,
+does your crosshair track close to your direction of travel, or point
+~90 degrees off to the side? Confirmed: close to travel direction. That's
+only possible under the classic held-key mechanic (wishdir = view angle
++/- 90 degrees, whichever of A/D is held) -- a "keyboardless" setup
+automates *which key* is held (based on which way you're currently turning
+the mouse), it does not remove the offset. This trainer had been feeding
+the raw mouse-controlled view angle in as the wish direction directly, zero
+offset -- silently training a different, easier skill (aim perpendicular to
+your own velocity) than the one real strafing muscle memory is built on,
+and explains why every earlier round of fixes (mouse curve, tickrate label,
+the quality formula three times over) never actually closed the gap: they
+were all built on top of a wishdir model that was never right in the first
+place. Confirmed independently before shipping: `idealYawSpeedUncapped`/
+`idealYawSpeedCapped` in `physics.mjs` -- present since early in the
+project -- were already computing "the yaw speed to hold the optimal
+angle," which only makes sense under the view+/-90 model; `main.js`'s
+actual tick loop just never used that model for the live wishdir. Fixed via
+`keyboardlessWishDir` in `physics.mjs`: sign of the 90-degree offset
+follows whichever way you're turning the mouse that tick; zero movement
+means no key is being held, i.e. no wish direction and no gain, matching
+`AirAccelerate` itself (wishspeed 0 fails the addspeed check and returns
+without touching velocity). Verified with a dedicated regression suite
+(`test/keyboardless-model.test.mjs`): continuous one-directional turning at
+the theoretical ideal yaw rate gains speed every tick and converges to
+exactly the known steady state (accel == airMaxSpeed, wishdir-relative-to-
+velocity angle == 90 degrees); a realistic back-and-forth strafe (direction
+reversing every few ticks, as a real strafer alternates keys) still nets a
+speed gain across many reversals, not just in the single-direction case.
+
 ## How it works
 
 - `src/physics.mjs` -- pure port of the Source engine's `AirAccelerate`
