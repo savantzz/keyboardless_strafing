@@ -13,7 +13,7 @@ function efficiencyColor(pct) {
   return `hsl(${hue}, 85%, 52%)`;
 }
 
-export function renderSyncBars(ctx, { ticks, maxTicks, speed, syncPct, avgEfficiencyPct }) {
+export function renderSyncBars(ctx, { ticks, maxTicks, speed, syncPct, avgEfficiencyPct, lastTickYawDeg }) {
   const { canvas } = ctx;
   const w = canvas.width;
   const h = canvas.height;
@@ -60,7 +60,14 @@ export function renderSyncBars(ctx, { ticks, maxTicks, speed, syncPct, avgEffici
   ctx.textBaseline = 'bottom';
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.font = '12px "SF Mono", "Cascadia Code", monospace';
-  ctx.fillText(`avg efficiency  ${avgEfficiencyPct.toFixed(0)}%`, w - 16, h - 20);
-  ctx.fillText(`speed  ${speed.toFixed(0)} u/s`, w - 16, h - 4);
+  ctx.fillText(`avg efficiency  ${avgEfficiencyPct.toFixed(0)}%`, w - 16, h - 36);
+  ctx.fillText(`speed  ${speed.toFixed(0)} u/s`, w - 16, h - 20);
+  // Diagnostic: raw turn the last tick actually registered. Move the mouse
+  // slowly and watch this -- if it stays at a flat 0.00 while you can feel
+  // yourself moving the mouse, the input isn't reaching the sim at all
+  // (most likely Windows' "Enhance pointer precision" dampening slow
+  // movement before the browser sees it), as opposed to just being small.
+  ctx.fillStyle = Math.abs(lastTickYawDeg ?? 0) > 0.001 ? 'rgba(120,220,140,0.9)' : 'rgba(255,255,255,0.4)';
+  ctx.fillText(`last tick turn  ${(lastTickYawDeg ?? 0).toFixed(3)} deg`, w - 16, h - 4);
   ctx.textAlign = 'left';
 }

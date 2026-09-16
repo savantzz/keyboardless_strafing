@@ -147,6 +147,14 @@ input.onLockChange = (locked) => {
 
 const trace = new SyncTrace({ maxTicks: 240 });
 
+// Diagnostic: the raw turn this specific tick produced, in degrees. Lets
+// you see directly on screen whether slow mouse movement is actually
+// reaching the sim at all (a real but tiny number here vs. a flat 0.00
+// while you're clearly moving the mouse tells apart "small effect" from
+// "input isn't arriving," e.g. from Windows' mouse-acceleration curve
+// dampening slow movement before the browser ever sees it).
+let lastTickYawDeg = 0;
+
 // Physics ticks: authoritative velocity simulation. Sync is scored per
 // tick (one bar = one tick), comparing the actual speed gain against the
 // theoretical max achievable from the same starting speed/angle -- reusing
@@ -157,6 +165,7 @@ function onTick(dt, yawDelta) {
   const startSpeed = vecLength(state.velocity);
   const startAngle = Math.atan2(state.velocity.y, state.velocity.x);
 
+  lastTickYawDeg = (yawDelta * 180) / Math.PI;
   state.worldViewAngle += yawDelta;
   const result = applyAirAccelTick(state.velocity, state.worldViewAngle, params);
   state.velocity = result.velocity;
@@ -186,12 +195,25 @@ function onFrame() {
     speed,
     syncPct: trace.syncPercent(),
     avgEfficiencyPct: trace.averageEfficiencyPct(),
+    lastTickYawDeg,
   });
 }
 
 const sim = new Simulation({ tickRate: Number(controls.tickRate.value), onTick, onFrame, input });
 
-linkPair(controls.initialVelocity, el('initialVelocityNum'));
+// Also live-applies to the currently running simulation (rescaling the
+// current velocity vector to the new magnitude, keeping its direction) --
+// not just "what to reset to." Otherwise dragging this mid-session visibly
+// does nothing, since the sim only reads it once at load/reset.
+linkPair(controls.initialVelocity, el('initialVelocityNum'), (v) => {
+  const speed = vecLength(state.velocity);
+  const angle = Math.atan2(state.velocity.y, state.velocity.x);
+  if (speed > 1e-6) {
+    state.velocity = { x: v * Math.cos(angle), y: v * Math.sin(angle) };
+  } else {
+    state.velocity = { x: v, y: 0 };
+  }
+});
 const applyTickRate = linkPair(controls.tickRate, el('tickRateNum'), (v) => sim.setTickRate(v));
 linkPair(controls.airAccelerate, el('airAccelerateNum'));
 linkPair(controls.groundMaxSpeed, el('groundMaxSpeedNum'));
