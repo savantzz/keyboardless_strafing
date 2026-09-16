@@ -156,24 +156,37 @@ const trace = new SyncTrace({ maxTicks: 240 });
 let lastTickYawDeg = 0;
 
 // Physics ticks: authoritative velocity simulation. Sync is scored per
-// tick (one bar = one tick) as a min-max-normalized "quality": where this
-// tick's actual v_new^2 falls between the worst possible outcome (aiming
-// 180deg opposite of ideal) and the best possible outcome (aiming exactly
-// ideal), both computed with the same applyAirAccelTick the live
-// simulation uses, so it always reflects the current settings exactly.
+// tick (one bar = one tick) as a piecewise quality score:
+//   - gaining (actualGain >= 0): actualGain / idealGain (the standard
+//     speedGain/idealGain ratio, matching Momentum Mod's own
+//     strafe-trainer HUD), so 0% = no gain, 100% = the best this tick
+//     could do.
+//   - losing (actualGain < 0): actualGain / accelCap instead. accelCap is
+//     fixed by settings (never shrinks with speed), which is the point --
+//     see below.
 //
-// This replaced a straight speedGain/idealGain ratio (matching Momentum
-// Mod's own strafe-trainer HUD) after real testing showed it became wildly
-// unstable at higher speed: idealGain shrinks roughly as 1/speed, so a
-// fixed, tiny real-world aiming error (0.5deg) swung from ~99% at 260 u/s
-// to -35% at 4000 u/s for the exact same absolute precision -- the metric
-// was reporting a shrinking yardstick's noise as if it were the player
-// getting worse. Anchoring to v_new^2 (which stays the same order of
-// magnitude as v^2 itself, never vanishing) instead of the tiny
-// best-minus-start gain fixes this: the same 0.5deg error now reads as a
-// stable ~100% at every speed, and quality degrades smoothly with angle
-// error alone (100% near ideal, 50% at 45deg off, 0% at 90deg off, at any
-// speed) rather than being distorted by how large the reference speed is.
+// This replaced two earlier, each-broken-in-a-different-way attempts:
+// 1. A straight (possibly negative) speedGain/idealGain ratio everywhere:
+//    idealGain shrinks roughly as 1/speed, so a fixed, tiny real-world
+//    aiming error (0.5deg) swung from ~99% at 260 u/s to -35% at 4000 u/s
+//    for the exact same absolute precision.
+// 2. A min-max normalization between v_new^2 at the ideal angle and
+//    v_new^2 aiming 180deg opposite: this fixed (1), but made "resting"
+//    (accel = 0, i.e. literally zero gain) score ~99.6% instead of 0%,
+//    because "aim 180deg backward" is a far more extreme worst-case than
+//    "do nothing," which compressed the whole useful range near the top.
+//    Reported directly: the HUD defaulted to looking great while idle.
+//
+// This piecewise version keeps (1)'s proven-correct gaining-side ratio
+// (same as the validated reference implementation) while fixing (2)'s
+// resting bug exactly: accelGain = 0 now gives exactly 0%, not a value
+// anchored to an unrelated extreme. The losing side no longer depends on
+// idealGain at all, so it can't inherit that ratio's high-speed
+// volatility. The gaining side's high-speed sensitivity near the exact
+// optimum is a known remaining tradeoff -- every formulation tried so far
+// either has that property or breaks somewhere else (see conversation
+// history) -- flagged for future revisit if it proves to matter in
+// practice.
 function onTick(dt, yawDelta) {
   const params = readParams();
   const startSpeed = vecLength(state.velocity);
@@ -188,13 +201,15 @@ function onTick(dt, yawDelta) {
   const idealA = idealAngle(startSpeed, params.airMaxSpeed, cap);
   const startVel = { x: startSpeed * Math.cos(startAngle), y: startSpeed * Math.sin(startAngle) };
   const best = applyAirAccelTick(startVel, startAngle + idealA, params);
-  const worst = applyAirAccelTick(startVel, startAngle + Math.PI, params);
 
-  const vBest2 = best.speed ** 2;
-  const vWorst2 = worst.speed ** 2;
-  const vActual2 = result.speed ** 2;
-  const denom = vBest2 - vWorst2;
-  const efficiencyPct = denom > 1e-9 ? ((vActual2 - vWorst2) / denom) * 100 : 100;
+  const idealGain = best.speed - startSpeed;
+  const actualGain = result.speed - startSpeed;
+  let efficiencyPct;
+  if (actualGain >= 0) {
+    efficiencyPct = idealGain > 1e-9 ? (actualGain / idealGain) * 100 : 100;
+  } else {
+    efficiencyPct = (actualGain / cap) * 100;
+  }
 
   trace.push({ efficiencyPct, gained: result.accel > 0 });
 }

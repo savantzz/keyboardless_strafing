@@ -43,21 +43,34 @@ tiny, real aiming errors. 260 keeps everything comfortably legible while
 learning; the "why the ratio metric changed" note below is the more
 important one now.
 
-**Why the score isn't a straight gain ratio:** it used to be `speedGain /
-idealGain` (see "Ported from Momentum Mod" below) directly. Real testing
-at higher speed produced what looked like "random" wild swings between
+**Why the score isn't a straight gain ratio (round 1):** it started as
+`speedGain / idealGain` (see "Ported from Momentum Mod" below) directly.
+Real testing at higher speed produced "random"-looking wild swings between
 deep blue and deep red on a smooth, consistent mouse sweep. Root-caused it
 directly: `idealGain` (the theoretical best single-tick gain) shrinks
 roughly as 1/speed, so a fixed real-world aiming error of 0.5 degrees swung
 from ~99% at 260 u/s to **-35% at 4000 u/s** -- same absolute precision,
 wildly different-looking number, purely because the yardstick itself was
-vanishing. Replaced it with a min-max normalization of the resulting
-`v_new^2` between the worst outcome (aiming 180 degrees opposite the ideal
-direction) and the best outcome (aiming exactly ideal) -- both anchored to
-`v^2` itself, which never vanishes, so it never blows up. Verified: the
-same 0.5-degree error now reads as a stable ~100% at every speed from 260
-to 4000, and quality degrades smoothly with angle error alone (100% near
-ideal, 50% at 45 degrees off, 0% at 90 degrees off) regardless of speed.
+vanishing.
+
+**Round 2, also wrong:** replaced it with a min-max normalization of
+`v_new^2` between "aim 180 degrees opposite ideal" (0%) and "aim exactly
+ideal" (100%), which fixed the volatility -- but broke something else,
+reported directly: standing still (`accel = 0`, literally zero gain)
+scored ~99.6% and painted the HUD blue at rest. Cause: anchoring "worst"
+to an extreme (aiming fully backward, which actively decelerates you) made
+"doing nothing" sit almost at the top of that wide range, since doing
+nothing is much closer to ideal than actively reversing is.
+
+**Current version:** piecewise. Gaining speed uses the original
+`actualGain / idealGain` ratio (0% = no gain, 100% = this tick's best
+possible, matching the reference HUD, including its high-speed
+sensitivity near the exact optimum -- no formulation tried avoided that
+without breaking something else worse, see conversation history).
+Actively losing speed switches to `actualGain / accelCap` instead --
+`accelCap` is fixed by your settings and never shrinks with speed, so it
+can't inherit the same-yardstick problem. Verified: resting now scores
+exactly 0%, not ~99.6%.
 
 **Why the bars are smoothed:** raw per-tick "gained" is a hard threshold,
 and real hand motion has brief micro-reversals (tremor) even during a
