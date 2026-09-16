@@ -15,9 +15,9 @@ python3 -m http.server 8000
 Click the canvas to lock the pointer, then move the mouse to strafe.
 
 The trainer's core visual is a scrolling bar chart -- one bar per game
-tick, height and color driven by that tick's speed-gain ratio (actual gain
-/ theoretical max for your speed, ported from Momentum Mod's own
-strafe-trainer HUD -- see "Ported from Momentum Mod" below), smoothed over
+tick, height and color driven by a min-max-normalized "quality" score for
+that tick (0% = the worst possible outcome for that angle, 100% = the best
+possible, see `onTick` in `main.js` for exactly how and why), smoothed over
 a short trailing window (see "Why the bars are smoothed" below). A dashed
 line marks 100% (optimal); bars above it mean over-rotating past optimal,
 below the zero baseline means actively losing speed that tick. The
@@ -26,18 +26,38 @@ all, unsmoothed. Since keyboardless strafing has no key press defining a
 wish direction, a dip in this signal *is* the hesitation-at-a-direction-reversal
 problem -- no separate smoothness heuristic needed on top of it. Settings (tickrate,
 sv_airaccelerate, sensitivity, m_yaw, air-accel penalties) are behind the
-gear icon, top left; tickrate has quick-select buttons for 64/66.667/100/128,
+gear icon, top left; tickrate has quick-select buttons for 64/66.667/100.4/128,
 every slider has a paired number input for typing an exact value, and all
 of it is remembered in the browser (`localStorage`) across sessions.
 
-**Why the default speed is 260, not something higher:** the angular window
-where a strafe actually gains speed shrinks as your speed rises --
-`gainRange()` in `physics.mjs` gives its exact width, e.g. ~13 degrees at
-260 u/s but only ~2 degrees at 1600 u/s. At high speed, even fast, precise
-mouse control will land inside that window for only a couple of ticks per
-sweep, which reads as sparse, "chunky" bars -- that's the physics being
-accurately unforgiving, not a rendering bug. 260 keeps the window wide
-enough to be learnable.
+**Why the default speed is 260, not something higher:** `gainRange()` in
+`physics.mjs` (~13 degrees wide at 260 u/s, ~2 degrees at 1600 u/s) measures
+a narrow band centered tightly on the true 90-degree optimum -- **not** "the
+region where you gain any speed at all," which is actually much wider
+(verified directly: at 1600 u/s you gain speed across roughly an 89-to-180-degree
+range, not 2 degrees -- an earlier version of this note overstated how
+unforgiving high speed is). What *does* get harder at high speed is landing
+close to the exact optimum, and more importantly, the raw speedGain/idealGain
+ratio (see below) used to blow up disproportionately at high speed even for
+tiny, real aiming errors. 260 keeps everything comfortably legible while
+learning; the "why the ratio metric changed" note below is the more
+important one now.
+
+**Why the score isn't a straight gain ratio:** it used to be `speedGain /
+idealGain` (see "Ported from Momentum Mod" below) directly. Real testing
+at higher speed produced what looked like "random" wild swings between
+deep blue and deep red on a smooth, consistent mouse sweep. Root-caused it
+directly: `idealGain` (the theoretical best single-tick gain) shrinks
+roughly as 1/speed, so a fixed real-world aiming error of 0.5 degrees swung
+from ~99% at 260 u/s to **-35% at 4000 u/s** -- same absolute precision,
+wildly different-looking number, purely because the yardstick itself was
+vanishing. Replaced it with a min-max normalization of the resulting
+`v_new^2` between the worst outcome (aiming 180 degrees opposite the ideal
+direction) and the best outcome (aiming exactly ideal) -- both anchored to
+`v^2` itself, which never vanishes, so it never blows up. Verified: the
+same 0.5-degree error now reads as a stable ~100% at every speed from 260
+to 4000, and quality degrades smoothly with angle error alone (100% near
+ideal, 50% at 45 degrees off, 0% at 90 degrees off) regardless of speed.
 
 **Why the bars are smoothed:** raw per-tick "gained" is a hard threshold,
 and real hand motion has brief micro-reversals (tremor) even during a
@@ -63,15 +83,18 @@ that only exist when Momentum Mod itself is running, so none of it
 executes in a browser -- using it "as a basis" would mean owning and
 installing that specific game and dropping files into its UI folder, not
 opening a page. But two things from its `scripts/hud/strafe-trainer.ts`
-were worth porting as design/formula, not code: (1) its core metric is
-`speedGain / idealGain`, validating this trainer's `efficiencyPct`
-independently; (2) critically, it does *not* clamp that ratio to
-[0, 100] -- it shows negative when you're actively losing speed and >100%
-when over-rotating, with a 7-tier color scale (blue/cyan/green/yellow/
-gray/orange/red) instead of a flat two-color gradient. This trainer had
-been discarding exactly that information by flooring at 0%; both are
-adopted now (`render.js`'s `tierColor`/`COLOR_STOPS`, ported from that
-file's `Colors` object and `getColorPair`). Its other file,
+were worth porting as design, not code: (1) its core metric,
+`speedGain / idealGain`, was this trainer's original `efficiencyPct` too
+(since replaced -- see above -- after real testing exposed it as unstable
+at high speed, which the reference HUD may or may not also suffer from;
+we don't have its engine-side scale to compare against); (2) critically,
+it does *not* clamp that ratio to [0, 100] -- it shows negative when
+you're actively losing speed and >100% when over-rotating, with a 7-tier
+color scale (blue/cyan/green/yellow/gray/orange/red) instead of a flat
+two-color gradient. This trainer had been discarding exactly that
+unclamped information; both the unclamped range and the color tiers carry
+over to the new quality score (`render.js`'s `tierColor`/`COLOR_STOPS`,
+ported from that file's `Colors` object and `getColorPair`). Its other file,
 `strafe-sync.ts` ("Strafe Offset"), measures key-press-vs-mouse-turn
 timing in ticks -- inherently needs an A/D key event to compare against,
 so it doesn't apply to keyboardless training at all.

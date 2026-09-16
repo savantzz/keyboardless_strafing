@@ -156,10 +156,24 @@ const trace = new SyncTrace({ maxTicks: 240 });
 let lastTickYawDeg = 0;
 
 // Physics ticks: authoritative velocity simulation. Sync is scored per
-// tick (one bar = one tick), comparing the actual speed gain against the
-// theoretical max achievable from the same starting speed/angle -- reusing
-// the same applyAirAccelTick the live simulation uses, not a separate
-// formula, so "max possible" always reflects the current settings exactly.
+// tick (one bar = one tick) as a min-max-normalized "quality": where this
+// tick's actual v_new^2 falls between the worst possible outcome (aiming
+// 180deg opposite of ideal) and the best possible outcome (aiming exactly
+// ideal), both computed with the same applyAirAccelTick the live
+// simulation uses, so it always reflects the current settings exactly.
+//
+// This replaced a straight speedGain/idealGain ratio (matching Momentum
+// Mod's own strafe-trainer HUD) after real testing showed it became wildly
+// unstable at higher speed: idealGain shrinks roughly as 1/speed, so a
+// fixed, tiny real-world aiming error (0.5deg) swung from ~99% at 260 u/s
+// to -35% at 4000 u/s for the exact same absolute precision -- the metric
+// was reporting a shrinking yardstick's noise as if it were the player
+// getting worse. Anchoring to v_new^2 (which stays the same order of
+// magnitude as v^2 itself, never vanishing) instead of the tiny
+// best-minus-start gain fixes this: the same 0.5deg error now reads as a
+// stable ~100% at every speed, and quality degrades smoothly with angle
+// error alone (100% near ideal, 50% at 45deg off, 0% at 90deg off, at any
+// speed) rather than being distorted by how large the reference speed is.
 function onTick(dt, yawDelta) {
   const params = readParams();
   const startSpeed = vecLength(state.velocity);
@@ -172,20 +186,15 @@ function onTick(dt, yawDelta) {
 
   const cap = accelCap(params);
   const idealA = idealAngle(startSpeed, params.airMaxSpeed, cap);
-  const best = applyAirAccelTick(
-    { x: startSpeed * Math.cos(startAngle), y: startSpeed * Math.sin(startAngle) },
-    startAngle + idealA,
-    params,
-  );
-  const maxGain = best.speed - startSpeed;
-  const actualGain = result.speed - startSpeed;
-  // Unclamped, matching Momentum Mod's own strafe-trainer HUD (speedGain /
-  // idealGain, shown as-is): negative means you actively lost speed this
-  // tick, >100% means you gained more than the single-tick reference (can
-  // happen in the accel-capped regime). Clamping this to [0, 100] was
-  // throwing away exactly the information that tells losing speed apart
-  // from merely not gaining it.
-  const efficiencyPct = maxGain > 1e-9 ? (actualGain / maxGain) * 100 : actualGain >= 0 ? 100 : -100;
+  const startVel = { x: startSpeed * Math.cos(startAngle), y: startSpeed * Math.sin(startAngle) };
+  const best = applyAirAccelTick(startVel, startAngle + idealA, params);
+  const worst = applyAirAccelTick(startVel, startAngle + Math.PI, params);
+
+  const vBest2 = best.speed ** 2;
+  const vWorst2 = worst.speed ** 2;
+  const vActual2 = result.speed ** 2;
+  const denom = vBest2 - vWorst2;
+  const efficiencyPct = denom > 1e-9 ? ((vActual2 - vWorst2) / denom) * 100 : 100;
 
   trace.push({ efficiencyPct, gained: result.accel > 0 });
 }

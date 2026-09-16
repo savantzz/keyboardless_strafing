@@ -1,13 +1,16 @@
 // Scrolling per-tick sync bars: oldest on the left, most recent on the
-// right. Bar height is that tick's speed-gain ratio (smoothed over a short
-// trailing window -- see synctrace.js) relative to a horizontal "optimal"
-// reference line at 100%: bars reaching it are ideal, taller means
-// over-rotating past it, shorter means under-turning, and bars dropping
-// below the zero baseline mean actively losing speed that tick. Color
-// tiers and the unclamped ratio (rather than floored at 0%) are ported
-// from Momentum Mod's own strafe-trainer HUD (its speedGain/idealGain
-// ratio, unclamped, with the same blue/cyan/green/yellow/gray/orange/red
-// tiering) -- see conversation history for the source file.
+// right. Bar height is that tick's quality score (smoothed over a short
+// trailing window -- see synctrace.js): a min-max normalization of this
+// tick's resulting speed between the worst possible outcome (0%) and the
+// best possible outcome (100%) for the angle you were aiming at -- see
+// main.js's onTick for why this replaced a straight speedGain/idealGain
+// ratio (unstable at high speed). A horizontal "optimal" reference line
+// marks 100%: bars reaching it are ideal, taller means over-rotating past
+// it, shorter means under-turning, and bars dropping below the zero
+// baseline mean actively losing speed that tick. The unclamped range and
+// color tiers (rather than floored at 0%, flat red-green) are ported from
+// Momentum Mod's own strafe-trainer HUD -- see conversation history for
+// the source file.
 function lerp(a, b, t) {
   return a + (b - a) * t;
 }
@@ -110,7 +113,7 @@ export function renderSyncBars(ctx, { ticks, maxTicks, speed, syncPct, avgEffici
   ctx.textBaseline = 'bottom';
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.font = '12px "SF Mono", "Cascadia Code", monospace';
-  ctx.fillText(`avg gain ratio  ${avgEfficiencyPct.toFixed(0)}%`, w - 16, h - 36);
+  ctx.fillText(`avg quality  ${avgEfficiencyPct.toFixed(0)}%`, w - 16, h - 36);
   ctx.fillText(`speed  ${speed.toFixed(0)} u/s`, w - 16, h - 20);
   // Diagnostic: raw turn the last tick actually registered. Move the mouse
   // slowly and watch this -- if it stays at a flat 0.00 while you can feel

@@ -1,6 +1,7 @@
-// Per-tick "strafe sync" tracking, matching the standard bhop/surf HUD
-// metric: for each physics tick, did you gain speed (accel > 0) and how
-// close was that gain to the theoretical max for your speed that tick.
+// Per-tick "strafe sync" tracking: for each physics tick, did you gain
+// speed at all (accel > 0), and a speed-independent quality score for how
+// close your aim was to ideal that tick (see main.js's onTick for how
+// that score is computed and why).
 //
 // The raw per-tick signal is real but too sharp to read at a glance: real
 // hand motion has brief micro-reversals (tremor) even during a sweep that
