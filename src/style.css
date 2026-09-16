@@ -122,7 +122,50 @@ canvas#trace {
 .field label { color: #aaa; flex: 1; }
 .field input[type="range"] { flex: 2; accent-color: var(--accent); }
 .field input[type="checkbox"] { accent-color: var(--accent); }
-.field output { width: 52px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+
+.field input.num {
+  width: 60px;
+  background: #111;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 5px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.field input.num:focus {
+  outline: none;
+  border-color: #444;
+}
+/* Hide the spinner arrows -- they eat into the already-tight width and
+   aren't needed since the slider covers coarse adjustment. */
+.field input.num::-webkit-inner-spin-button,
+.field input.num::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.field input.num[type="number"] { -moz-appearance: textfield; }
+
+.presets {
+  display: flex;
+  gap: 6px;
+  margin: -2px 0 10px;
+}
+.presets button {
+  flex: 1;
+  background: #111;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 0;
+  font-size: 11px;
+  cursor: pointer;
+}
+.presets button:hover {
+  color: var(--text);
+  border-color: #444;
+}
 
 button#resetBtn {
   background: transparent;

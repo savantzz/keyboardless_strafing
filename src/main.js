@@ -35,6 +35,23 @@ const controls = {
   penaltyMoveup: el('penaltyMoveup'),
 };
 
+// Every slider gets a matching number input the user can type an exact
+// value into (dragging a thin slider for something like sensitivity is too
+// imprecise) -- bind them together so either one updates both.
+function linkPair(rangeEl, numEl, onChange) {
+  const apply = (value) => {
+    rangeEl.value = value;
+    numEl.value = value;
+    if (onChange) onChange(Number(value));
+  };
+  rangeEl.addEventListener('input', () => apply(rangeEl.value));
+  numEl.addEventListener('change', () => apply(numEl.value));
+  numEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') apply(numEl.value);
+  });
+  return apply;
+}
+
 // Documented minimum penalty multipliers from the reference sheet (fraction
 // of unpenalized sv_airaccelerate effectiveness).
 const PENALTY_MIN = { crouch: 88.4 / 260, walk: 135.2 / 260, z: 1 / 4, moveup: 203.026 / 260 };
@@ -127,23 +144,15 @@ function onFrame(nowMs) {
 
 const sim = new Simulation({ tickRate: Number(controls.tickRate.value), onTick, onFrame, input });
 
-controls.tickRate.addEventListener('input', () => sim.setTickRate(Number(controls.tickRate.value)));
-controls.sensitivity.addEventListener('input', () => (input.sensitivity = Number(controls.sensitivity.value)));
-controls.mYaw.addEventListener('input', () => (input.mYaw = Number(controls.mYaw.value)));
+linkPair(controls.initialVelocity, el('initialVelocityNum'));
+const applyTickRate = linkPair(controls.tickRate, el('tickRateNum'), (v) => sim.setTickRate(v));
+linkPair(controls.airAccelerate, el('airAccelerateNum'));
+linkPair(controls.groundMaxSpeed, el('groundMaxSpeedNum'));
+linkPair(controls.sensitivity, el('sensitivityNum'), (v) => (input.sensitivity = v));
+linkPair(controls.mYaw, el('mYawNum'), (v) => (input.mYaw = v));
 
-for (const [id, out] of [
-  ['initialVelocity', 'initialVelocityOut'],
-  ['tickRate', 'tickRateOut'],
-  ['airAccelerate', 'airAccelerateOut'],
-  ['groundMaxSpeed', 'groundMaxSpeedOut'],
-  ['sensitivity', 'sensitivityOut'],
-  ['mYaw', 'mYawOut'],
-]) {
-  const input_ = controls[id];
-  const output = el(out);
-  const sync = () => (output.textContent = input_.value);
-  input_.addEventListener('input', sync);
-  sync();
+for (const btn of document.querySelectorAll('#tickRatePresets button')) {
+  btn.addEventListener('click', () => applyTickRate(btn.dataset.value));
 }
 
 el('resetBtn').addEventListener('click', resetState);
