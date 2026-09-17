@@ -1,7 +1,11 @@
 // Per-tick "strafe sync" tracking: for each physics tick, did you gain
-// speed at all (accel > 0), and a speed-independent quality score for how
-// close your aim was to ideal that tick (see main.js's onTick for how
-// that score is computed and why).
+// speed at all (accel > 0), and two separate speed-independent ratios (see
+// main.js's onTick for how each is computed and why): efficiencyPct (a
+// yaw-rate ratio, drives bar height) and gainRatioPct (a speedGain/
+// idealGain ratio, drives bar color -- see render.js). Both are smoothed
+// over the same trailing window independently, matching the reference
+// Momentum Mod implementation's two separate buffers (gainRatioHistory,
+// yawRatioHistory) averaged the same way.
 //
 // The raw per-tick signal is real but too sharp to read at a glance: real
 // hand motion has brief micro-reversals (tremor) even during a sweep that
@@ -28,7 +32,7 @@ export class SyncTrace {
   constructor({ maxTicks = 240, smoothingWindow = 10 } = {}) {
     this.maxTicks = maxTicks;
     this.smoothingWindow = smoothingWindow;
-    this.ticks = []; // { efficiencyPct, gained, smoothedEfficiencyPct }
+    this.ticks = []; // { efficiencyPct, gainRatioPct, gained, smoothedEfficiencyPct, smoothedGainRatioPct }
   }
 
   push(sample) {
@@ -36,6 +40,7 @@ export class SyncTrace {
     const start = Math.max(0, this.ticks.length - this.smoothingWindow + 1);
     const window = this.ticks.slice(start).concat(entry);
     entry.smoothedEfficiencyPct = window.reduce((sum, t) => sum + t.efficiencyPct, 0) / window.length;
+    entry.smoothedGainRatioPct = window.reduce((sum, t) => sum + t.gainRatioPct, 0) / window.length;
 
     this.ticks.push(entry);
     if (this.ticks.length > this.maxTicks) this.ticks.shift();

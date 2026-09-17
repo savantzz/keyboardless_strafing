@@ -2,6 +2,7 @@ import {
   DEFAULT_PARAMS,
   accelCap,
   applyAirAccelTick,
+  idealAngle,
   idealYawSpeedFor,
   keyboardlessWishDir,
   tickInterval,
@@ -184,9 +185,21 @@ let lastTickYawDeg = 0;
 // matter how fast you turned, which is why bars never crossed the
 // reference line even when strafing very fast. A yaw-rate ratio has no
 // such ceiling, since it's just two rotation amounts divided.
+//
+// Bar COLOR is a second, separate metric: speedGain/idealGain (the ratio
+// this replaced above, brought back here for a different job), matching
+// the reference exactly -- confirmed directly from strafe-trainer.ts:
+// graphHistory stores { ratio: yawRatio, gain: gainRatio } as two
+// independent fields, height comes from `ratio`, color from `gain`
+// (getColorPair(s.gain, ...) in drawGraph). Reusing the yaw ratio for
+// color too (what this file did before) meant sustained over-turning
+// pinned every bar to the same flat color once past the top color-tier
+// breakpoint, since nothing here distinguished "over-turned a little,
+// still gaining well" from "over-turned wildly, barely gaining at all."
 function onTick(dt, yawDelta) {
   const params = readParams();
   const startSpeed = vecLength(state.velocity);
+  const startAngle = Math.atan2(state.velocity.y, state.velocity.x);
 
   lastTickYawDeg = (yawDelta * 180) / Math.PI;
   state.worldViewAngle += yawDelta;
@@ -208,7 +221,14 @@ function onTick(dt, yawDelta) {
   const actualYawDelta = Math.abs(yawDelta);
   const efficiencyPct = idealYawDelta > 1e-9 ? (actualYawDelta / idealYawDelta) * 100 : 0;
 
-  trace.push({ efficiencyPct, gained: result.accel > 0 });
+  const idealA = idealAngle(startSpeed, params.airMaxSpeed, cap);
+  const startVel = { x: startSpeed * Math.cos(startAngle), y: startSpeed * Math.sin(startAngle) };
+  const best = applyAirAccelTick(startVel, startAngle + idealA, params);
+  const idealGain = best.speed - startSpeed;
+  const actualGain = result.speed - startSpeed;
+  const gainRatioPct = idealGain > 1e-9 ? (actualGain / idealGain) * 100 : 0;
+
+  trace.push({ efficiencyPct, gainRatioPct, gained: result.accel > 0 });
 }
 
 // Rendering runs every animation frame (not just on tick) so the numeric

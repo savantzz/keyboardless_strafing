@@ -1,15 +1,31 @@
 // Scrolling per-tick sync bars: oldest on the left, most recent on the
-// right. Bar height is that tick's quality score (smoothed over a short
-// trailing window -- see synctrace.js): actual mouse turn this tick versus
-// the ideal turn amount for your current speed/settings, as a percentage
-// (idealYawSpeedFor in physics.mjs) -- see main.js's onTick for the full
-// reasoning and what this replaced. A horizontal "optimal" reference line
-// marks 100%: bars reaching it turned exactly the ideal amount, taller
-// means over-turning past it, shorter means under-turning. Unbounded
-// above (confirmed directly from momentum-mod/game issue #1629: its own
-// "gain percentage" is explicitly not clamped to 100 either) -- the
-// unclamped range and color tiers are ported from Momentum Mod's own
-// strafe-trainer HUD design, see conversation history for the source.
+// right. Bar HEIGHT is that tick's yaw-rate ratio (smoothed -- see
+// synctrace.js): actual mouse turn this tick versus the ideal turn amount
+// for your current speed/settings (idealYawSpeedFor in physics.mjs) -- see
+// main.js's onTick for the full reasoning and what this replaced. A
+// horizontal "optimal" reference line marks 100%: bars reaching it turned
+// exactly the ideal amount, taller means over-turning past it, shorter
+// means under-turning. Unbounded above (confirmed directly from
+// momentum-mod/game issue #1629: its own "gain percentage" is explicitly
+// not clamped to 100 either).
+//
+// Bar COLOR is a SEPARATE metric: speedGain/idealGain (also smoothed),
+// not the same ratio driving height. Confirmed directly from the actual
+// Momentum Mod panorama source (scripts/hud/strafe-trainer.ts,
+// drawGraph()/getColorPair()): graphHistory stores { ratio, gain } as two
+// independent fields, height from `ratio` (yaw), color from `gain`. Using
+// one ratio for both (an earlier version here did) meant sustained
+// over-turning pinned every bar to the same flat color past the top
+// tier's breakpoint, since nothing distinguished "over-turned a little,
+// still gaining well" from "over-turned wildly, barely gaining at all."
+// gainTierColor below ports getColorPair's exact threshold/lerp structure
+// (its overStrafing=false branch, the only one the reference itself uses
+// for these bars), fractions there (1.02, 0.99, ...) multiplied by 100 to
+// match this file's percent scale; the SYNC% headline number keeps the
+// original tierColor/COLOR_STOPS smooth 7-stop scale below, since that
+// stat (unlike bar color) has no reference equivalent to port from --
+// strafe-sync.ts, the reference's other stat file, tracks key-press-vs-
+// mouse-turn timing, which doesn't apply to keyboardless training at all.
 function lerp(a, b, t) {
   return a + (b - a) * t;
 }
@@ -53,6 +69,41 @@ function tierColor(ratio) {
 const DISPLAY_MIN = -60;
 const DISPLAY_MAX = 180;
 
+// Base RGB for each tier, ported directly from the reference's Colors
+// object (its first/"low" value of each [low, high] gradient pair -- this
+// file fills bars flat rather than replicating the reference's per-slice
+// gradient shading, a rendering embellishment orthogonal to the height/
+// color-metric split this function exists for). LOSS is unused: the
+// reference's overStrafing=false branch (ported below, the one it uses for
+// these bars) never returns it -- that color only appears in its other,
+// direction-aware branch this file doesn't use.
+const GAIN_TIER = {
+  EXTRA: [24, 150, 211],
+  PERFECT: [87, 200, 255],
+  GOOD: [21, 152, 86],
+  SLOW: [248, 222, 74],
+  NEUTRAL: [178, 178, 178],
+  STOP: [211, 24, 24],
+};
+
+// Ported directly from getColorPair(ratio, overStrafing=false) in the
+// reference's strafe-trainer.ts -- its own fraction thresholds (1.02,
+// 0.99, 0.95, 0.85, 0.75, 0.5, 0, -5) multiplied by 100 to match this
+// file's percent scale. pct is speedGain/idealGain, not the yaw ratio.
+function gainTierColor(pct) {
+  let rgb;
+  if (pct > 102) rgb = GAIN_TIER.EXTRA;
+  else if (pct > 99) rgb = GAIN_TIER.PERFECT;
+  else if (pct > 95) rgb = GAIN_TIER.GOOD;
+  else if (pct <= -500) rgb = GAIN_TIER.STOP;
+  else if (pct > 85) rgb = lerpRgb(GAIN_TIER.SLOW, GAIN_TIER.GOOD, (pct - 85) / 10);
+  else if (pct > 75) rgb = GAIN_TIER.SLOW;
+  else if (pct > 50) rgb = lerpRgb(GAIN_TIER.NEUTRAL, GAIN_TIER.SLOW, (pct - 50) / 25);
+  else if (pct > 0) rgb = GAIN_TIER.NEUTRAL;
+  else rgb = lerpRgb(GAIN_TIER.NEUTRAL, GAIN_TIER.STOP, Math.min(1, Math.abs(pct) / 500));
+  return `rgb(${rgb.map(Math.round).join(',')})`;
+}
+
 export function renderSyncBars(ctx, { ticks, maxTicks, speed, syncPct, avgEfficiencyPct, lastTickYawDeg }) {
   const { canvas } = ctx;
   const w = canvas.width;
@@ -80,11 +131,10 @@ export function renderSyncBars(ctx, { ticks, maxTicks, speed, syncPct, avgEffici
 
   ticks.forEach((tick, i) => {
     const x = (startIndex + i) * barWidth;
-    const pct = tick.smoothedEfficiencyPct;
-    const y = yFor(pct);
+    const y = yFor(tick.smoothedEfficiencyPct);
     const top = Math.min(y, zeroY);
     const barH = Math.max(2, Math.abs(zeroY - y));
-    ctx.fillStyle = tierColor(pct);
+    ctx.fillStyle = gainTierColor(tick.smoothedGainRatioPct);
     ctx.fillRect(x, top, Math.max(1, barWidth - 1), barH);
   });
 

@@ -221,18 +221,31 @@ mouse movement still looked "overly bumpy." Two separate causes:
    constant -- added it to the settings panel here too
    (`averagingWindow`, wired straight to `SyncTrace.smoothingWindow`).
 
-   Reading the actual source also surfaced something not yet ported: the
-   reference decouples bar **height** (the yaw ratio, what this repo now
-   uses for both) from bar **color** (a separate `speedGain/idealGain`
-   ratio, `s.gain` in `graphHistory`) -- height and color come from two
-   different metrics there, not one value driving both. That's a
-   plausible second contributor to "blue everywhere" beyond the z-order
-   bug: this repo's color tiers flatten to a single solid color for
-   anything at or past ~105%, so any sustained over-turning currently
-   paints uniformly blue regardless of *how* over-turned. Flagged, not
-   yet implemented -- it's a real design fork (which metric should drive
-   which channel) worth deciding deliberately rather than copying
-   reflexively.
+   Reading the actual source also surfaced, and (asked directly) then
+   implemented, the reference's height/color split: bar **height** is the
+   yaw ratio (unchanged here), bar **color** is a separate
+   `speedGain/idealGain` ratio (`gainRatioPct` in `main.js`, `s.gain` in
+   the reference's `graphHistory`) -- two different metrics, not one
+   value driving both. Brought back the per-tick `idealAngle`-based best-
+   possible-gain simulation (removed in round 4, since the yaw ratio
+   doesn't need it) purely to compute this second ratio, smoothed over
+   the same trailing window as the yaw ratio (`SyncTrace` now tracks and
+   smooths both independently, matching the reference's two separate
+   buffers). `render.js`'s new `gainTierColor` ports
+   `getColorPair(ratio, overStrafing=false)`'s exact threshold/lerp
+   structure verbatim (its fraction thresholds -- 1.02, 0.99, 0.95, 0.85,
+   0.75, 0.5, 0, -5 -- multiplied by 100 for this file's percent scale;
+   only the `overStrafing=false` branch, since that's the only one the
+   reference itself uses for these bars). The SYNC% headline number keeps
+   the original smooth 7-stop `tierColor` scale, since it has no
+   reference equivalent to port -- the reference's other stat file,
+   `strafe-sync.ts`, tracks key-press-vs-mouse-turn timing, which doesn't
+   apply to keyboardless training. Verified directly: the same sustained,
+   massively-over-turning scenario that previously painted solid blue
+   (tall bars, but actual speed dropping -- a poor gain ratio) now shows
+   tall bars in red, and a well-executed oscillating strafe (net speed
+   gain) shows a nuanced gray/yellow/green mix instead of a single flat
+   color.
 
 ## How it works
 
