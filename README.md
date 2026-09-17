@@ -196,6 +196,44 @@ Panorama zip. Two separate causes:
    ported EXTRA/blue tier), matching the reference implementation's own
    unclamped behavior.
 
+**Reference-line z-order and the averaging window (round 5):** reported
+directly, from a screenshot of sustained over-strafing: the whole chart
+went solid blue and the dashed "optimal" line vanished, and consistent
+mouse movement still looked "overly bumpy." Two separate causes:
+
+1. `render.js` drew the dashed reference line *before* the bars loop, so
+   any bar tall enough to reach it painted straight over it -- exactly
+   the situation (sustained over-turning) where seeing how far past
+   optimal you are matters most. Fixed by moving the line draw to after
+   the bars, on top, where it can't be covered.
+2. Asked directly whether this repo's 12-tick smoothing window matched
+   "the averaging window command from the zip" (the Momentum Mod
+   panorama source uploaded earlier). Rather than trust memory, found the
+   original zip file still on disk and read `strafe-trainer.ts` directly:
+   `DEFAULT_BUFFER_LENGTH = 10`, exposed to players as a real setting
+   named "Averaging Window" (`updateBufferLength`/`interpFrames`, backed
+   by a ring buffer where each sample is pre-scaled by
+   `sampleWeight = 1/interpFrames` so summing the buffer gives a true
+   moving average -- mechanically different from this repo's
+   slice-and-reduce, but the same result: a plain trailing mean over the
+   last N ticks). Changed the default from 12 to 10 to match exactly, and
+   -- since the reference exposes it as a real setting, not a hardcoded
+   constant -- added it to the settings panel here too
+   (`averagingWindow`, wired straight to `SyncTrace.smoothingWindow`).
+
+   Reading the actual source also surfaced something not yet ported: the
+   reference decouples bar **height** (the yaw ratio, what this repo now
+   uses for both) from bar **color** (a separate `speedGain/idealGain`
+   ratio, `s.gain` in `graphHistory`) -- height and color come from two
+   different metrics there, not one value driving both. That's a
+   plausible second contributor to "blue everywhere" beyond the z-order
+   bug: this repo's color tiers flatten to a single solid color for
+   anything at or past ~105%, so any sustained over-turning currently
+   paints uniformly blue regardless of *how* over-turned. Flagged, not
+   yet implemented -- it's a real design fork (which metric should drive
+   which channel) worth deciding deliberately rather than copying
+   reflexively.
+
 ## How it works
 
 - `src/physics.mjs` -- pure port of the Source engine's `AirAccelerate`

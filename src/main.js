@@ -35,6 +35,7 @@ const controls = {
   groundMaxSpeed: el('groundMaxSpeed'),
   sensitivity: el('sensitivity'),
   mYaw: el('mYaw'),
+  averagingWindow: el('averagingWindow'),
   penaltyCrouch: el('penaltyCrouch'),
   penaltyWalk: el('penaltyWalk'),
   penaltyZ: el('penaltyZ'),
@@ -46,7 +47,7 @@ const controls = {
 // Applied before anything reads controls.value below, so a saved value
 // wins over the HTML default from the very first frame.
 const STORAGE_KEY = 'strafe-trainer-settings-v1';
-const RANGE_IDS = ['initialVelocity', 'tickRate', 'airAccelerate', 'groundMaxSpeed', 'sensitivity', 'mYaw'];
+const RANGE_IDS = ['initialVelocity', 'tickRate', 'airAccelerate', 'groundMaxSpeed', 'sensitivity', 'mYaw', 'averagingWindow'];
 const CHECKBOX_IDS = ['penaltyCrouch', 'penaltyWalk', 'penaltyZ', 'penaltyMoveup'];
 const numEl = (id) => el(id + 'Num');
 
@@ -157,7 +158,7 @@ input.onLockChange = (locked) => {
   el('lockHint').classList.toggle('locked', locked);
 };
 
-const trace = new SyncTrace({ maxTicks: 240 });
+const trace = new SyncTrace({ maxTicks: 240, smoothingWindow: Number(controls.averagingWindow.value) });
 
 // Diagnostic: the raw turn this specific tick produced, in degrees. Lets
 // you see directly on screen whether slow mouse movement is actually
@@ -245,6 +246,11 @@ const applyAirAccelerate = linkPair(controls.airAccelerate, el('airAccelerateNum
 const applyGroundMaxSpeed = linkPair(controls.groundMaxSpeed, el('groundMaxSpeedNum'));
 const applySensitivity = linkPair(controls.sensitivity, el('sensitivityNum'), (v) => (input.sensitivity = v));
 const applyMYaw = linkPair(controls.mYaw, el('mYawNum'), (v) => (input.mYaw = v));
+const applyAveragingWindow = linkPair(
+  controls.averagingWindow,
+  el('averagingWindowNum'),
+  (v) => (trace.smoothingWindow = v),
+);
 
 for (const btn of document.querySelectorAll('#tickRatePresets button')) {
   btn.addEventListener('click', () => applyTickRate(btn.dataset.value));
@@ -275,6 +281,7 @@ function resetSettingsToDefaults() {
   applyGroundMaxSpeed(controls.groundMaxSpeed.defaultValue);
   applySensitivity(controls.sensitivity.defaultValue);
   applyMYaw(controls.mYaw.defaultValue);
+  applyAveragingWindow(controls.averagingWindow.defaultValue);
   for (const id of CHECKBOX_IDS) {
     controls[id].checked = controls[id].defaultChecked;
   }

@@ -63,6 +63,15 @@
     </fieldset>
 
     <fieldset>
+      <legend>Display</legend>
+      <div class="field">
+        <label for="averagingWindow">averaging window (ticks)</label>
+        <input id="averagingWindow" type="range" min="1" max="60" step="1" value="10" />
+        <input id="averagingWindowNum" class="num" type="number" step="1" value="10" />
+      </div>
+    </fieldset>
+
+    <fieldset>
       <legend>Air-accel penalties</legend>
       <div class="field"><label for="penaltyCrouch">crouch (+duck)</label><input id="penaltyCrouch" type="checkbox" /></div>
       <div class="field"><label for="penaltyWalk">walk (+speed)</label><input id="penaltyWalk" type="checkbox" /></div>

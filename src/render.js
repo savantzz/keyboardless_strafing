@@ -69,22 +69,14 @@ export function renderSyncBars(ctx, { ticks, maxTicks, speed, syncPct, avgEffici
 
   const yFor = (pct) => zeroY - Math.max(DISPLAY_MIN, Math.min(DISPLAY_MAX, pct)) * pxPerPct;
 
-  // Zero baseline.
+  // Zero baseline -- drawn under the bars deliberately: it's meant to read
+  // as a floor, and most bars sit above it anyway.
   ctx.strokeStyle = 'rgba(255,255,255,0.15)';
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(0, zeroY);
   ctx.lineTo(w, zeroY);
   ctx.stroke();
-
-  // Optimal (100%) reference line.
-  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-  ctx.setLineDash([5, 5]);
-  ctx.beginPath();
-  ctx.moveTo(0, optimalY);
-  ctx.lineTo(w, optimalY);
-  ctx.stroke();
-  ctx.setLineDash([]);
 
   ticks.forEach((tick, i) => {
     const x = (startIndex + i) * barWidth;
@@ -95,6 +87,19 @@ export function renderSyncBars(ctx, { ticks, maxTicks, speed, syncPct, avgEffici
     ctx.fillStyle = tierColor(pct);
     ctx.fillRect(x, top, Math.max(1, barWidth - 1), barH);
   });
+
+  // Optimal (100%) reference line -- drawn AFTER the bars, on top, so a run
+  // of tall bars (over-turning, which is exactly when this line matters
+  // most for gauging how far past optimal you are) can't paint over it and
+  // hide it. Reported directly: sustained over-strafing turned the whole
+  // chart solid blue and the line disappeared underneath.
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.setLineDash([5, 5]);
+  ctx.beginPath();
+  ctx.moveTo(0, optimalY);
+  ctx.lineTo(w, optimalY);
+  ctx.stroke();
+  ctx.setLineDash([]);
 
   // HUD top-right / bottom-right -- settings live top-left now, so the
   // readouts and the live edge (newest bar, far right) share the same side

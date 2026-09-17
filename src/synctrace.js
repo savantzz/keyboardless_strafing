@@ -9,14 +9,23 @@
 // threshold, a single-tick blip flips a bar from full-green to flat-red
 // rather than just denting it. Verified empirically (see conversation/
 // commit history) that a short window (3-5 ticks) barely helps -- it takes
-// something like a 12-tick (~180ms) trailing window to actually flatten
-// tremor-driven noise down to just the real underlying transitions, so
-// each pushed sample also carries a smoothed value over that window for
+// something like a 10-tick trailing window to actually flatten tremor-
+// driven noise down to just the real underlying transitions, so each
+// pushed sample also carries a smoothed value over that window for
 // rendering. syncPercent()/averageEfficiencyPct() still use the raw values
 // -- they're already aggregates over many ticks, so smoothing first
 // wouldn't change them meaningfully, and raw is the more honest number.
+//
+// 10 (not an earlier empirically-chosen 12) to match the actual reference
+// implementation exactly: confirmed directly from the uploaded Momentum
+// Mod panorama source (scripts/hud/strafe-trainer.ts), which has this as
+// a user-facing "Averaging Window" setting, DEFAULT_BUFFER_LENGTH = 10 --
+// same mechanism (a true moving average over the last N ticks), just a
+// ring buffer with pre-scaled samples (sampleWeight = 1/interpFrames)
+// instead of a literal slice+reduce. Exposed here as an adjustable
+// setting too, matching the reference.
 export class SyncTrace {
-  constructor({ maxTicks = 240, smoothingWindow = 12 } = {}) {
+  constructor({ maxTicks = 240, smoothingWindow = 10 } = {}) {
     this.maxTicks = maxTicks;
     this.smoothingWindow = smoothingWindow;
     this.ticks = []; // { efficiencyPct, gained, smoothedEfficiencyPct }
