@@ -237,3 +237,18 @@ export function keyboardlessWishDir(worldViewAngle, yawDelta) {
   const sign = Math.sign(yawDelta);
   return { active: sign !== 0, wishDirRad: worldViewAngle + sign * (Math.PI / 2) };
 }
+
+// --- Real-keyboard strafing input model ---
+//
+// Same view-angle +/- 90-degree offset as keyboardlessWishDir, but the
+// sign comes from an actually-held key instead of being inferred from
+// this tick's mouse motion. keyDir is +1 (right/D) or -1 (left/A) held,
+// or 0 for neither/both (matches the reference StrafeOffset's own
+// keyDir: "both or neither -> 0, transient"). Unlike the keyboardless
+// model, a held key stays active even on a tick where the mouse doesn't
+// move at all -- that's the whole point of measuring real key-vs-mouse
+// timing (strafesync.js), which needs the key's own independent signal,
+// not one re-derived from the mouse it's meant to be compared against.
+export function keyWishDir(worldViewAngle, keyDir) {
+  return { active: keyDir !== 0, wishDirRad: worldViewAngle + keyDir * (Math.PI / 2) };
+}

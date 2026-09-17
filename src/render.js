@@ -104,7 +104,17 @@ function gainTierColor(pct) {
   return `rgb(${rgb.map(Math.round).join(',')})`;
 }
 
-export function renderSyncBars(ctx, { ticks, maxTicks, speed, syncPct, avgEfficiencyPct, lastTickYawDeg }) {
+// Colors for the latest-keyswitch readout (keyboard mode only), ported
+// from the reference's StrafeOffset.colorFor: late = its LATE orange,
+// early = its EARLY blue, perfect = its PERFECT green. Same base RGB as
+// GAIN_TIER.GOOD/EXTRA and the old COLOR_STOPS LOSS entry, named
+// separately here since they're a different stat with its own meaning.
+const KEYSWITCH_COLOR = { PERFECT: 'rgb(21,152,86)', LATE: 'rgb(220,116,13)', EARLY: 'rgb(24,150,211)' };
+
+export function renderSyncBars(
+  ctx,
+  { ticks, maxTicks, speed, syncPct, syncLabel, avgEfficiencyPct, lastTickYawDeg, latestKeySwitch },
+) {
   const { canvas } = ctx;
   const w = canvas.width;
   const h = canvas.height;
@@ -162,11 +172,20 @@ export function renderSyncBars(ctx, { ticks, maxTicks, speed, syncPct, avgEffici
 
   ctx.fillStyle = 'rgba(255,255,255,0.5)';
   ctx.font = '11px -apple-system, "Segoe UI", sans-serif';
-  ctx.fillText('SYNC', w - 16, 52);
+  ctx.fillText(syncLabel ?? 'SYNC', w - 16, 52);
 
   ctx.textBaseline = 'bottom';
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.font = '12px "SF Mono", "Cascadia Code", monospace';
+  // Latest real keyswitch timing (keyboard mode only) -- ported from the
+  // reference's own per-event text readout (StrafeOffset.updateText).
+  // Added above the other diagnostics rather than shifting their fixed
+  // positions, so the rest of the HUD doesn't jump when toggling modes.
+  if (latestKeySwitch) {
+    ctx.fillStyle = KEYSWITCH_COLOR[latestKeySwitch.tier] ?? 'rgba(255,255,255,0.7)';
+    ctx.fillText(`last keyswitch  ${latestKeySwitch.text}`, w - 16, h - 52);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  }
   ctx.fillText(`avg quality  ${avgEfficiencyPct.toFixed(0)}%`, w - 16, h - 36);
   ctx.fillText(`speed  ${speed.toFixed(0)} u/s`, w - 16, h - 20);
   // Diagnostic: raw turn the last tick actually registered. Move the mouse

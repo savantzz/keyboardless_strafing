@@ -247,6 +247,47 @@ mouse movement still looked "overly bumpy." Two separate causes:
    gain) shows a nuanced gray/yellow/green mix instead of a single flat
    color.
 
+**Real Strafe Sync, via a keyboard-mode toggle (round 6):** asked
+directly for a way to get *actual* sync -- a real A/D toggle, with a real
+sync % appearing once it's on. The keyboardless model's own SYNC% (`%
+of ticks that gained speed`, in `synctrace.js`) was always a stand-in,
+explicitly documented as one, because there's no independent key signal
+in keyboardless play to time against the mouse -- comparing the mouse to
+something derived FROM the mouse measures nothing. Real "Strafe Sync"
+(the reference's own name, `StrafeOffset` in `strafe-sync.ts`, a separate
+file from `strafe-trainer.ts`) is a genuinely different metric: it pairs
+each strafe-key switch with the nearest matching mouse-turn-direction
+switch and reports the offset between them in whole ticks -- positive
+(late) if the key follows the mouse, negative (early) if the key leads
+it, "perfect" within a small threshold.
+
+Added a "use real A/D keys" checkbox (`keyboardModeEnabled`). Off
+(default): unchanged keyboardless behavior. On: `src/keyboard-input.js`
+captures actual `KeyA`/`KeyD` state (only while pointer-locked, same
+gating `input.js` already uses for mousemove); the wish direction comes
+from `keyWishDir` in `physics.mjs` (the held key's own direction) instead
+of `keyboardlessWishDir` (inferred from the mouse) -- same view +/- 90
+degree offset either way, just a different source for which side. Unlike
+keyboardless mode, a held key stays active on a tick where the mouse
+doesn't move at all, since that's the whole point of having an
+independent second signal. `src/strafesync.js` is a direct port of the
+reference's pairing algorithm (`onKeySwitch`/`onTurnSwitch`/matching
+window, unchanged), tested in `test/strafesync.test.mjs` against concrete
+same-tick/early/late/out-of-window scenarios. The SYNC% headline number
+switches to `% of recorded keyswitches within the perfect threshold`
+(this repo's own rollup into one number -- the reference itself has no
+single percentage, just per-event text plus a scrolling offset-bar
+history) and the label changes to "SYNC (keyboard)" so it's never
+ambiguous which stat is on screen. A "last keyswitch" readout
+(Perfect / Late Nt / Early Nt, colored to match) is added below the
+existing diagnostics, ported from the reference's own per-event text.
+Verified directly in a headless browser: holding a key and turning the
+mouse to match drives real speed gain identically to keyboardless mode's
+physics (same wishdir formula, different direction source); a
+well-synced oscillating key+mouse pattern reads 100% and shows "Perfect";
+a key pressed well before any mouse turn reads "Early Nt" in blue with
+the correct tick count.
+
 ## How it works
 
 - `src/physics.mjs` -- pure port of the Source engine's `AirAccelerate`
@@ -269,10 +310,15 @@ mouse movement still looked "overly bumpy." Two separate causes:
   first catch-up tick and left the rest at zero: one artificial spike
   followed by nothing, from otherwise smooth mouse movement. Regression
   test in `test/sim.test.mjs`.
-- `src/synctrace.js` -- rolling history of per-tick efficiency/gained
-  samples, each annotated with a smoothed efficiency value (trailing
-  ~12-tick window) for rendering, plus the raw sync-percent and
-  average-efficiency stats.
+- `src/synctrace.js` -- rolling history of per-tick yaw-ratio/gain-ratio/
+  gained samples, each annotated with independently-smoothed values
+  (trailing ~10-tick window, adjustable) for rendering, plus the raw
+  sync-percent and average-efficiency stats.
+- `src/keyboard-input.js` -- real A/D key capture for keyboard mode (see
+  "Real Strafe Sync" below), gated on pointer lock like `input.js`.
+- `src/strafesync.js` -- real strafe-key-vs-mouse-turn timing, a direct
+  port of the reference's `StrafeOffset` pairing algorithm. Only
+  meaningful in keyboard mode.
 - `src/render.js` -- draws the sync bars and HUD.
 - `src/main.js` -- wires the above together and reads the settings panel.
 

@@ -5,13 +5,16 @@ import {
   idealAngle,
   idealYawSpeedFor,
   keyboardlessWishDir,
+  keyWishDir,
   tickInterval,
   vecLength,
 } from './physics.mjs';
 import { MouseInput } from './input.js';
+import { KeyboardInput } from './keyboard-input.js';
 import { Simulation } from './sim.js';
 import { renderSyncBars } from './render.js';
 import { SyncTrace } from './synctrace.js';
+import { StrafeSync } from './strafesync.js';
 
 const canvas = document.getElementById('trace');
 const ctx = canvas.getContext('2d');
@@ -37,6 +40,7 @@ const controls = {
   sensitivity: el('sensitivity'),
   mYaw: el('mYaw'),
   averagingWindow: el('averagingWindow'),
+  keyboardModeEnabled: el('keyboardModeEnabled'),
   penaltyCrouch: el('penaltyCrouch'),
   penaltyWalk: el('penaltyWalk'),
   penaltyZ: el('penaltyZ'),
@@ -49,7 +53,7 @@ const controls = {
 // wins over the HTML default from the very first frame.
 const STORAGE_KEY = 'strafe-trainer-settings-v1';
 const RANGE_IDS = ['initialVelocity', 'tickRate', 'airAccelerate', 'groundMaxSpeed', 'sensitivity', 'mYaw', 'averagingWindow'];
-const CHECKBOX_IDS = ['penaltyCrouch', 'penaltyWalk', 'penaltyZ', 'penaltyMoveup'];
+const CHECKBOX_IDS = ['keyboardModeEnabled', 'penaltyCrouch', 'penaltyWalk', 'penaltyZ', 'penaltyMoveup'];
 const numEl = (id) => el(id + 'Num');
 
 function loadSavedSettings() {
@@ -152,14 +156,37 @@ const input = new MouseInput({
   mYaw: Number(controls.mYaw.value),
 });
 input.attach(canvas);
+
+// Real A/D key capture for "keyboard mode" (see keyboard-input.js,
+// keyWishDir in physics.mjs, and strafesync.js). Always attached, like
+// MouseInput -- direction() itself only reports a held key while locked,
+// so this is inert whenever keyboard mode is off or the pointer isn't
+// locked.
+const keyboardInput = new KeyboardInput();
+keyboardInput.attach();
+
 input.onLockChange = (locked) => {
   el('lockHint').textContent = locked
     ? 'Locked -- move the mouse to strafe. Esc to release.'
     : 'Click to lock the mouse and start.';
   el('lockHint').classList.toggle('locked', locked);
+  keyboardInput.setLocked(locked);
 };
 
 const trace = new SyncTrace({ maxTicks: 240, smoothingWindow: Number(controls.averagingWindow.value) });
+
+// Real strafe-key-vs-mouse-turn timing (see strafesync.js) -- only
+// meaningful in keyboard mode, since keyboardless mode infers its "held
+// key" directly from the mouse, leaving no independent second signal to
+// time against. tickIndex is a running per-tick counter (the reference
+// derives its own from wall-clock time / tick interval; a counter is
+// equivalent here since this sim already ticks at a fixed rate).
+// TURN_EPS_RAD adapts the reference's TURN_EPS (0.5 deg/frame, ignores
+// turn jitter below this) to a per-tick threshold, since this sim's
+// yawDelta is already per-tick rather than per-frame.
+const strafeSync = new StrafeSync();
+let tickIndex = 0;
+const TURN_EPS_RAD = (0.5 * Math.PI) / 180;
 
 // Diagnostic: the raw turn this specific tick produced, in degrees. Lets
 // you see directly on screen whether slow mouse movement is actually
@@ -204,17 +231,25 @@ function onTick(dt, yawDelta) {
   lastTickYawDeg = (yawDelta * 180) / Math.PI;
   state.worldViewAngle += yawDelta;
 
-  // See keyboardlessWishDir in physics.mjs for why this isn't just
-  // applyAirAccelTick(state.velocity, state.worldViewAngle, params) --
-  // confirmed directly that view/crosshair tracks close to travel
-  // direction while strafing well, which means view angle itself is not
-  // the wish direction; it's offset +/-90 degrees by whichever key an
-  // auto-strafe setup is currently holding.
-  const { active, wishDirRad } = keyboardlessWishDir(state.worldViewAngle, yawDelta);
+  // Keyboard mode: wish direction comes from an actually-held A/D key
+  // (keyWishDir) instead of being inferred from this tick's mouse motion
+  // (keyboardlessWishDir) -- see physics.mjs for both. Only keyboard mode
+  // also drives strafesync.js's real key-vs-mouse timing metric, since
+  // keyboardless mode's "held key" is derived FROM the mouse, leaving
+  // nothing independent to time it against.
+  const keyboardMode = controls.keyboardModeEnabled.checked;
+  const { active, wishDirRad } = keyboardMode
+    ? keyWishDir(state.worldViewAngle, keyboardInput.direction())
+    : keyboardlessWishDir(state.worldViewAngle, yawDelta);
   const result = active
     ? applyAirAccelTick(state.velocity, wishDirRad, params)
     : { velocity: state.velocity, speed: startSpeed, accel: 0 };
   state.velocity = result.velocity;
+
+  tickIndex += 1;
+  if (keyboardMode) {
+    strafeSync.update(tickIndex, keyboardInput.direction(), yawDelta, TURN_EPS_RAD);
+  }
 
   const cap = accelCap(params);
   const idealYawDelta = idealYawSpeedFor(startSpeed, params.airMaxSpeed, cap, params.tickRate) * tickInterval(params.tickRate);
@@ -236,13 +271,38 @@ function onTick(dt, yawDelta) {
 // when a new tick lands.
 function onFrame() {
   const speed = vecLength(state.velocity);
+  const keyboardMode = controls.keyboardModeEnabled.checked;
+  // Keyboard mode swaps the headline SYNC% for the real strafe-key-vs-
+  // mouse timing stat (strafesync.js) instead of the keyboardless proxy
+  // (trace.syncPercent(), "% of ticks that gained speed" -- see
+  // synctrace.js's own comment for why that stand-in exists at all).
+  // syncPercent() is null before any keyswitch has been recorded yet,
+  // distinct from an actual 0%.
+  const syncPct = keyboardMode ? (strafeSync.syncPercent() ?? 0) : trace.syncPercent();
+
+  // Formatted here (not in render.js) so render.js stays pure drawing --
+  // text/tier ported directly from the reference's updateText: "Perfect"
+  // within perfectThreshold ticks, else "Late Nt"/"Early Nt".
+  let latestKeySwitch = null;
+  if (keyboardMode) {
+    const latest = strafeSync.latest();
+    if (latest) {
+      const rounded = Math.round(latest.offset);
+      if (Math.abs(rounded) <= strafeSync.perfectThreshold) latestKeySwitch = { text: 'Perfect', tier: 'PERFECT' };
+      else if (rounded > 0) latestKeySwitch = { text: `Late ${rounded}t`, tier: 'LATE' };
+      else latestKeySwitch = { text: `Early ${-rounded}t`, tier: 'EARLY' };
+    }
+  }
+
   renderSyncBars(ctx, {
     ticks: trace.ticks,
     maxTicks: trace.maxTicks,
     speed,
-    syncPct: trace.syncPercent(),
+    syncPct,
+    syncLabel: keyboardMode ? 'SYNC (keyboard)' : 'SYNC',
     avgEfficiencyPct: trace.averageEfficiencyPct(),
     lastTickYawDeg,
+    latestKeySwitch,
   });
 }
 
@@ -279,6 +339,11 @@ for (const btn of document.querySelectorAll('#tickRatePresets button')) {
 for (const id of CHECKBOX_IDS) {
   controls[id].addEventListener('change', saveSettings);
 }
+
+// Switching modes mid-run would otherwise leave a stale pending
+// key/mouse switch (from before the toggle) around to pair against a
+// switch that happens after it.
+controls.keyboardModeEnabled.addEventListener('change', () => strafeSync.clear());
 
 el('resetBtn').addEventListener('click', resetState);
 
