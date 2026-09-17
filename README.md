@@ -288,6 +288,64 @@ well-synced oscillating key+mouse pattern reads 100% and shows "Perfect";
 a key pressed well before any mouse turn reads "Early Nt" in blue with
 the correct tick count.
 
+**Four follow-up fixes from real play (round 7), including a self-caught
+regression:**
+
+1. **"everything goes gray suddenly" at high speed.** Real bug, and it was
+   this project's own doing: round 5 brought back the raw
+   `speedGain/idealGain` ratio for bar color, and a first attempt at
+   fixing this piecewise-substituted `accelCap` for `idealGain` on the
+   losing side -- reasonable on its face (round 3 did exactly this for
+   the OLD color scale), but never re-validated against the NEW
+   `gainTierColor` thresholds ported verbatim from the reference, whose
+   STOP floor is -500%. Confirmed directly: a realistic losing tick
+   (`actualGain=-30` at 500 u/s) came out to -4% on the accelCap-
+   normalized formula -- nowhere near red, stuck in the wide flat NEUTRAL
+   band -- versus -3336% on the raw ratio, well past the STOP floor and
+   correctly solid red. Reverted to the raw ratio (no special-casing,
+   gaining or losing), which is both what the reference actually does
+   and the one that produces its intended visual range. Verified
+   directly: the same massive-over-turn-at-high-speed scenario that
+   stayed solid gray now shows solid red for the losing portion. The
+   gaining side's high-speed sensitivity (idealGain shrinks roughly as
+   1/speed) is real and still present -- inherent to this exact metric,
+   including in the reference itself, not something to work around.
+2. **Keyboard-mode SYNC% "not calculated the way you're calculating,
+   pretty sure it's a continuously moving %."** Correct -- the discrete
+   event-pairing metric (ported directly from the reference's
+   `StrafeOffset`) only updates when a keyswitch actually gets paired,
+   which reads as chunky for a live headline number even though it's the
+   right shape for the "last keyswitch" diagnostic. Added a second,
+   simpler metric to `strafesync.js` not present in the reference: a
+   continuous per-tick check (does the held key's direction match this
+   tick's mouse turn?) rolled into a percentage over a trailing window,
+   updating every turning tick. The headline SYNC% now uses this;
+   `syncPercent()`/`latest()` (the discrete, event-based ones) are kept
+   for the "last keyswitch" readout. Regression tested with a case that
+   proves the two are genuinely different signals (100% continuous sync
+   from holding one matching key the whole run, despite only a single
+   discrete pairing event ever being recorded) and a window-aging case
+   (an old mismatched stretch ages out of the trailing window once
+   enough matched ticks follow it).
+3. **A reset keybind ("R perhaps when focused") and a speed lock ("fix
+   speed at a certain percentage").** Added both. `KeyR`, gated on
+   pointer lock (same gating as every other input handler here), calls
+   the same `resetState()` the Reset button does -- now also clearing
+   `strafeSync`, which it didn't before. A new "lock speed to initial
+   speed" checkbox re-clamps `state.velocity`'s magnitude back to the
+   initial-speed slider's value at the end of every tick, applied AFTER
+   that tick's scoring (so the HUD reflects what your technique actually
+   did, not a version pre-corrected by the clamp) -- lets you drill
+   angle/timing repeatedly at a fixed speed instead of it drifting
+   across a run.
+4. **"'strafe quality' at the bottom should be related to gain, not
+   yaw%, surely, or change the name."** Correct that the label was
+   misleading -- `avgEfficiencyPct` is the yaw-rate ratio average (same
+   metric as bar height), not gain. Took the "change the name" branch
+   rather than "make it gain": gain already has its own visual channel
+   (bar color), so a redundant third gain-based number seemed likely to
+   clutter more than clarify. Relabeled to "avg turn %".
+
 ## How it works
 
 - `src/physics.mjs` -- pure port of the Source engine's `AirAccelerate`

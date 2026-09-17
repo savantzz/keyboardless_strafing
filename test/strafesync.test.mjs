@@ -64,6 +64,43 @@ const EPS = 0.01; // radians, arbitrary "counts as a turn" threshold for these t
 {
   const sync = new StrafeSync();
   assert.equal(sync.syncPercent(), null, 'no data yet is null, not 0%');
+  assert.equal(sync.continuousSyncPercent(), null, 'continuous metric is also null before any turning tick');
+}
+
+// Continuous per-tick metric: updates every turning tick, not just at
+// keyswitch events -- holding the matching key the whole time should
+// read 100% even with zero recorded keyswitch-pairing events (key never
+// switches, so history stays empty), proving it's a genuinely separate
+// signal from syncPercent().
+{
+  const sync = new StrafeSync();
+  for (let tick = 0; tick < 20; tick++) {
+    sync.update(tick, 1, 0.5, EPS); // key held right the whole time, mouse turning right every tick
+  }
+  assert.equal(sync.history.length, 1, 'only the initial key switch is a pairing event');
+  assert.equal(sync.continuousSyncPercent(), 100, 'held key matching the turn direction every tick is 100%');
+}
+
+// Holding the WRONG key the whole time should read close to 0%, and
+// should update immediately (a "continuously moving" percentage), not
+// wait for a keyswitch to resolve.
+{
+  const sync = new StrafeSync();
+  for (let tick = 0; tick < 20; tick++) {
+    sync.update(tick, -1, 0.5, EPS); // key held left, mouse turning right -- mismatched every tick
+  }
+  assert.equal(sync.continuousSyncPercent(), 0, 'held key opposite the turn direction every tick is 0%');
+}
+
+// The continuous window only keeps the trailing N turning ticks -- an
+// early mismatched stretch should age out and stop dragging the percentage
+// down once enough matched ticks have followed it.
+{
+  const sync = new StrafeSync({ continuousWindow: 10 });
+  for (let tick = 0; tick < 10; tick++) sync.update(tick, -1, 0.5, EPS); // 10 mismatched
+  assert.equal(sync.continuousSyncPercent(), 0);
+  for (let tick = 10; tick < 20; tick++) sync.update(tick, 1, 0.5, EPS); // 10 matched, window is 10
+  assert.equal(sync.continuousSyncPercent(), 100, 'old mismatched ticks should age out of the trailing window');
 }
 
 console.log('All strafe-sync regression checks passed.');

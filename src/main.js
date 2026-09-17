@@ -41,6 +41,7 @@ const controls = {
   mYaw: el('mYaw'),
   averagingWindow: el('averagingWindow'),
   keyboardModeEnabled: el('keyboardModeEnabled'),
+  lockSpeedEnabled: el('lockSpeedEnabled'),
   penaltyCrouch: el('penaltyCrouch'),
   penaltyWalk: el('penaltyWalk'),
   penaltyZ: el('penaltyZ'),
@@ -53,7 +54,7 @@ const controls = {
 // wins over the HTML default from the very first frame.
 const STORAGE_KEY = 'strafe-trainer-settings-v1';
 const RANGE_IDS = ['initialVelocity', 'tickRate', 'airAccelerate', 'groundMaxSpeed', 'sensitivity', 'mYaw', 'averagingWindow'];
-const CHECKBOX_IDS = ['keyboardModeEnabled', 'penaltyCrouch', 'penaltyWalk', 'penaltyZ', 'penaltyMoveup'];
+const CHECKBOX_IDS = ['keyboardModeEnabled', 'lockSpeedEnabled', 'penaltyCrouch', 'penaltyWalk', 'penaltyZ', 'penaltyMoveup'];
 const numEl = (id) => el(id + 'Num');
 
 function loadSavedSettings() {
@@ -149,6 +150,7 @@ function resetState() {
   state.velocity = { x: Number(controls.initialVelocity.value), y: 0 };
   state.worldViewAngle = 0;
   trace.clear();
+  strafeSync.clear();
 }
 
 const input = new MouseInput({
@@ -213,16 +215,32 @@ let lastTickYawDeg = 0;
 // reference line even when strafing very fast. A yaw-rate ratio has no
 // such ceiling, since it's just two rotation amounts divided.
 //
-// Bar COLOR is a second, separate metric: speedGain/idealGain (the ratio
-// this replaced above, brought back here for a different job), matching
-// the reference exactly -- confirmed directly from strafe-trainer.ts:
-// graphHistory stores { ratio: yawRatio, gain: gainRatio } as two
-// independent fields, height comes from `ratio`, color from `gain`
-// (getColorPair(s.gain, ...) in drawGraph). Reusing the yaw ratio for
-// color too (what this file did before) meant sustained over-turning
-// pinned every bar to the same flat color once past the top color-tier
-// breakpoint, since nothing here distinguished "over-turned a little,
-// still gaining well" from "over-turned wildly, barely gaining at all."
+// Bar COLOR is a second, separate metric: the RAW speedGain/idealGain
+// ratio, unmodified, gaining or losing -- matching the reference exactly
+// (confirmed directly from strafe-trainer.ts: graphHistory stores
+// { ratio: yawRatio, gain: gainRatio } as two independent fields, height
+// from `ratio`, color from `gain`, and getColorPair(s.gain, ...) is
+// called with that raw ratio, no special-casing for losing).
+//
+// A first attempt here piecewise-substituted accelCap for idealGain on
+// the losing side (this project's own round 3, applied to a DIFFERENT,
+// older color scale). Reported directly as "everything goes gray
+// suddenly" at high speed -- confirmed directly why: round 3's
+// accelCap-normalized formula was calibrated against that older scale's
+// -20%/-100% LOSS/STOP breakpoints, but gainTierColor below ports the
+// REFERENCE's own thresholds verbatim, whose STOP floor is -500%. A
+// realistic losing tick (e.g. actualGain=-30 at 500 u/s) came out to
+// -4% on the accelCap-normalized formula -- nowhere near red, stuck
+// in the wide flat NEUTRAL band -- versus -3336% on the raw ratio,
+// well past the STOP floor and correctly solid red. The two were never
+// validated together; reverted to the raw ratio, which is both what the
+// reference actually does and, it turns out, the one that actually
+// produces the reference's intended visual range. The GAINING side's
+// high-speed sensitivity (idealGain shrinks roughly as 1/speed, so any
+// real aiming imprecision swings the ratio hugely -- round 1's original
+// -35%-at-4000-u/s finding) is real and still present, but is inherent
+// to this exact metric, including in the reference itself, not
+// something to work around here.
 function onTick(dt, yawDelta) {
   const params = readParams();
   const startSpeed = vecLength(state.velocity);
@@ -264,6 +282,21 @@ function onTick(dt, yawDelta) {
   const gainRatioPct = idealGain > 1e-9 ? (actualGain / idealGain) * 100 : 0;
 
   trace.push({ efficiencyPct, gainRatioPct, gained: result.accel > 0 });
+
+  // Requested directly ("fix speed at a certain percentage / reset it
+  // more easily"): a way to drill technique at a fixed speed instead of
+  // it drifting up or down across a run. Applied AFTER scoring above, not
+  // before -- the feedback should reflect what your actual technique this
+  // tick really did, not a version pre-corrected by the clamp; only the
+  // NEXT tick's starting speed is affected.
+  if (controls.lockSpeedEnabled.checked) {
+    const lockedSpeed = Number(controls.initialVelocity.value);
+    const curSpeed = vecLength(state.velocity);
+    if (curSpeed > 1e-6) {
+      const angle = Math.atan2(state.velocity.y, state.velocity.x);
+      state.velocity = { x: lockedSpeed * Math.cos(angle), y: lockedSpeed * Math.sin(angle) };
+    }
+  }
 }
 
 // Rendering runs every animation frame (not just on tick) so the numeric
@@ -276,9 +309,12 @@ function onFrame() {
   // mouse timing stat (strafesync.js) instead of the keyboardless proxy
   // (trace.syncPercent(), "% of ticks that gained speed" -- see
   // synctrace.js's own comment for why that stand-in exists at all).
-  // syncPercent() is null before any keyswitch has been recorded yet,
-  // distinct from an actual 0%.
-  const syncPct = keyboardMode ? (strafeSync.syncPercent() ?? 0) : trace.syncPercent();
+  // continuousSyncPercent() (not the discrete, keyswitch-event-only
+  // syncPercent()) so the headline number updates every turning tick --
+  // reported directly as the expected behavior for a live percentage,
+  // and it's null before any turning tick has happened yet, distinct
+  // from an actual 0%.
+  const syncPct = keyboardMode ? (strafeSync.continuousSyncPercent() ?? 0) : trace.syncPercent();
 
   // Formatted here (not in render.js) so render.js stays pure drawing --
   // text/tier ported directly from the reference's updateText: "Perfect"
@@ -346,6 +382,16 @@ for (const id of CHECKBOX_IDS) {
 controls.keyboardModeEnabled.addEventListener('change', () => strafeSync.clear());
 
 el('resetBtn').addEventListener('click', resetState);
+
+// Quick in-session reset without breaking focus to reach the settings
+// panel/button -- requested directly ("reset it more easily with a
+// keybind, R perhaps when focused on screen"). Gated on pointer lock so
+// it can't fire while typing (e.g. R doesn't appear in a type="number"
+// field anyway, but this also keeps it inert whenever the game isn't the
+// thing actually receiving input).
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyR' && document.pointerLockElement === canvas) resetState();
+});
 
 // Separate from resetState (which restarts the current run): this restores
 // the settings panel itself to index.html's declared defaults. Reported

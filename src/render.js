@@ -186,7 +186,14 @@ export function renderSyncBars(
     ctx.fillText(`last keyswitch  ${latestKeySwitch.text}`, w - 16, h - 52);
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
   }
-  ctx.fillText(`avg quality  ${avgEfficiencyPct.toFixed(0)}%`, w - 16, h - 36);
+  // Named "avg turn %" (not "avg quality") because avgEfficiencyPct is
+  // the yaw-rate ratio average -- the same metric driving bar height, not
+  // gain (which drives bar color, see gainTierColor above). Reported
+  // directly that "quality" reads as gain-related; renamed rather than
+  // changed, since gain already has its own visual channel (bar color)
+  // and a redundant third gain-based number would clutter the HUD more
+  // than it'd clarify.
+  ctx.fillText(`avg turn %  ${avgEfficiencyPct.toFixed(0)}%`, w - 16, h - 36);
   ctx.fillText(`speed  ${speed.toFixed(0)} u/s`, w - 16, h - 20);
   // Diagnostic: raw turn the last tick actually registered. Move the mouse
   // slowly and watch this -- if it stays at a flat 0.00 while you can feel

@@ -18,16 +18,27 @@
 // (key tick - mouse tick): positive means the key came late, negative
 // means it came early. Unpaired switches wait as "pending" until a
 // matching one arrives or a new switch of that same origin replaces them.
+//
+// Also tracks a second, simpler metric not present in the reference file:
+// a continuous per-tick "is the held key's direction the one matching
+// this tick's mouse turn" check, rolled into a percentage over a trailing
+// window. Reported directly as the expected behavior for a headline
+// SYNC% ("pretty sure it's a continuously moving %") -- the discrete
+// event-pairing metric above only changes at keyswitch events, which
+// reads as chunky/infrequent for a live headline number even though it's
+// the right shape for the per-event "last keyswitch" diagnostic.
 export class StrafeSync {
-  constructor({ historyLength = 15, perfectThreshold = 1, pairWindowTicks = 25 } = {}) {
+  constructor({ historyLength = 15, perfectThreshold = 1, pairWindowTicks = 25, continuousWindow = 60 } = {}) {
     this.historyLength = historyLength;
     this.perfectThreshold = perfectThreshold;
     this.pairWindowTicks = pairWindowTicks;
+    this.continuousWindow = continuousWindow;
     this.history = []; // { offset, side }
     this.lastKeyDir = 0;
     this.lastTurnDir = 0;
     this.pendingKey = null; // { tick, dir }
     this.pendingTurn = null; // { tick, dir }
+    this.continuousHistory = []; // booleans: held key matched the current turn direction this tick
   }
 
   // Call once per physics tick. tick is a whole tick index (just count
@@ -50,6 +61,20 @@ export class StrafeSync {
         this._onTurnSwitch(tick, turnDir);
         this.lastTurnDir = turnDir;
       }
+      // Continuous per-tick check, separate from the event-pairing above:
+      // is the currently-held key's direction the one that actually
+      // matches this tick's mouse turn? Pushed every tick the mouse is
+      // actually turning (not just at switches), so this rolls smoothly
+      // tick by tick rather than jumping only when a keyswitch happens to
+      // get paired -- reported directly as the expected behavior
+      // ("pretty sure it's a continuously moving %"), and it's a
+      // genuinely different, simpler question than the discrete timing
+      // offset above (which the reference's own StrafeOffset answers, and
+      // which this file's `latest()`/`syncPercent()` still expose for the
+      // "last keyswitch" diagnostic -- both are real, they just answer
+      // different questions).
+      this.continuousHistory.push(keyDir === turnDir);
+      if (this.continuousHistory.length > this.continuousWindow) this.continuousHistory.shift();
     }
   }
 
@@ -84,22 +109,35 @@ export class StrafeSync {
     this.lastTurnDir = 0;
     this.pendingKey = null;
     this.pendingTurn = null;
+    this.continuousHistory.length = 0;
   }
 
   latest() {
     return this.history.length ? this.history[this.history.length - 1] : null;
   }
 
-  // % of tracked keyswitches within the "perfect" threshold. The
-  // reference has no single headline percentage (it shows each event's
-  // own Perfect/Late Nt/Early Nt text plus a scrolling offset-bar
-  // history) -- this is this repo's own rollup of that into one number,
-  // for the existing SYNC% HUD slot. null (not 0) when there's no data
-  // yet, so callers can tell "no keyswitches recorded" apart from "0%
-  // synced".
+  // % of tracked keyswitches within the "perfect" timing threshold -- the
+  // discrete, event-based metric (only changes when a keyswitch actually
+  // gets paired). The reference has no single headline percentage for
+  // this either (it shows each event's own Perfect/Late Nt/Early Nt text
+  // plus a scrolling offset-bar history); this is this repo's own rollup,
+  // kept for the "last keyswitch" diagnostic rather than the headline
+  // SYNC% (see continuousSyncPercent for that). null (not 0) when there's
+  // no data yet, so callers can tell "no keyswitches recorded" apart from
+  // "0% synced".
   syncPercent() {
     if (!this.history.length) return null;
     const perfect = this.history.reduce((n, s) => n + (Math.abs(s.offset) <= this.perfectThreshold ? 1 : 0), 0);
     return (perfect / this.history.length) * 100;
+  }
+
+  // % of the last continuousWindow turning ticks where the held key
+  // matched the turn direction -- updates every tick the mouse is
+  // turning, not just at keyswitch events. This is the headline SYNC%
+  // in keyboard mode. null (not 0) before any turning tick has been seen.
+  continuousSyncPercent() {
+    if (!this.continuousHistory.length) return null;
+    const matched = this.continuousHistory.reduce((n, b) => n + (b ? 1 : 0), 0);
+    return (matched / this.continuousHistory.length) * 100;
   }
 }
